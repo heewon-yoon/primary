@@ -5,26 +5,1302 @@ date: "2024-03-19"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(stargazer)
+library(fixest)
+library(dplyr)
+
+#####################
+## incumbent profile
+#####################
+
+setwd("~/Desktop/Yoon/Korea Primary/election data/Congressional-elect(charac)")
+
+province <- c("bs", "cb", "cn", "dg", "dj", "gb", "gg", "gj", "gn", "gw",
+              "ic", "jb", "jj", "jn", "sj", "sl", "us")
+congress <- c(seq(13, 21, 1))
+filenames <- apply(expand.grid(province, congress), 1, paste, collapse="") 
+
+# SMD
+read_elect <- function(file) {
+  temp <- read_excel(paste0(file, ".xlsx"))
+  elect <- temp[4:nrow(temp), -7]
+  colnames(elect) <- c("district", "party", "name", "gender", "birth", "occupation",
+                       "education", "experience", "voteshare")
+  elect <- elect %>% mutate(
+    district = gsub("·", "", elect$district),
+    name = substr(name, 1, 3),
+    birth = substr(birth, 1, 4),
+    age = substr(sub('.*\\((.*)\\).*', '\\1', elect$birth), 1, 2),
+    voteshare = sub('.*\\((.*)\\).*', '\\1', elect$voteshare),
+    province = substr(file, 1, 2),
+    congress = substr(file, 3, 4)
+  )
+  return(elect)
+}
+
+file_smd <- filenames[file.exists(paste0(filenames, ".xlsx")) == T]
+
+list <- list()
+for (i in file_smd) {
+  list[[i]] <- read_elect(i)
+}
+
+elect_smd <- bind_rows(list) %>% 
+  select(congress, province, district, everything()) %>%
+  arrange(congress, province, district)
+
+# PR 
+read_elect_pr <- function(file) {
+  temp <- read_excel(paste0(file, ".xlsx"))
+  elect <- temp[4:nrow(temp), -7]
+  colnames(elect) <- c("party", "rank", "name", "gender", "birth", "occupation",
+                       "education", "experience")
+  elect <- elect %>% mutate(
+    name = substr(name, 1, 3),
+    birth = substr(birth, 1, 4),
+    age = substr(sub('.*\\((.*)\\).*', '\\1', elect$birth), 1, 2),
+    province = substr(file, 1, 2),
+    congress = substr(file, 3, 4)
+  )
+  return(elect)
+}
+
+file_pr <- c("pr17", "pr18", "pr19", "pr20", "pr21")
+
+list2 <- list()
+for (i in file_pr) {
+  list2[[i]] <- read_elect_pr(i)
+}
+
+elect_pr <- bind_rows(list2) %>% 
+  select(congress, province, everything()) %>%
+  arrange(congress, province)
+
+
+
+#####################
+## Vote Share
+#####################
+
+### SMD
+
+setwd("~/Desktop/Yoon/Korea Primary/election data/Congressional-SMD")
+
+read_vs <- function(file){
+  temp <- read_excel(paste0(file, ".xlsx"))
+  district <- drop_na(temp[-c(1:3), 1]) %>%
+    rename(district = 1) %>% mutate(district = gsub("·", "", district))
+  
+  cand <- which(temp[,(ncol(temp)-2)] == "계")
+  cand_party <- temp[c(cand),-c(1:4, (ncol(temp)-2):(ncol(temp)))] 
+  cand_vs <- temp[c(cand+2), -c(1:4, (ncol(temp)-2):(ncol(temp)))] 
+  
+  dat1 <- cbind(district, cand_party) %>% pivot_longer(cols = 2:ncol(.))
+  dat2 <- cbind(district, cand_vs) %>% pivot_longer(cols = 2:ncol(.))
+  
+  dat <- left_join(dat1, dat2, by = c("district", "name")) %>% select(-name) %>%
+    rename(cand = 2, vs = 3) %>%
+    mutate(party = gsub("\\s.*", "", cand),
+           cand = sub("^\\S+\\s+", "", cand)) %>% drop_na() %>%
+    mutate(province = substr(file, 1, 2),
+           congress = substr(file, 3, 4))
+  return(dat)
+}
+
+file_vs <- filenames[file.exists(paste0(filenames, ".xlsx")) == T]
+
+list3 <- list()
+for (i in file_vs) {
+  list3[[i]] <- read_vs(i)
+}
+
+smd_vs <- bind_rows(list3) %>% 
+  select(congress, province, district, everything()) %>%
+  arrange(congress, province, district)
+
+# change party names for multiple independent candidates in one district
+smd_vs <- smd_vs %>% group_by(congress, province, district, party) %>% 
+  mutate(party = if(n()>1) {make.unique(party)} 
+         else {party})
+
+# voteshare by party across elections
+list3.a = list()
+for (i in 13:21){
+  list3.a[[i]] <- smd_vs %>% select(-cand) %>% filter(congress == i) %>% 
+    pivot_wider(names_from = party, values_from = vs) %>% ungroup %>%
+    mutate(across(-c(congress, province, district), .fns = as.numeric))
+}
+
+sv13 <- list3.a[[13]]
+sv14 <- list3.a[[14]]
+sv15 <- list3.a[[15]]
+sv16 <- list3.a[[16]]
+sv17 <- list3.a[[17]]
+sv18 <- list3.a[[18]]
+sv19 <- list3.a[[19]]
+sv20 <- list3.a[[20]]
+sv21 <- list3.a[[21]]
+
+# candidates by party across elections
+list3.b <- list()
+for (i in 13:21){
+  list3.b[[i]] <- smd_vs %>% select(-vs) %>% filter(congress == i) %>%
+    pivot_wider(names_from = party, values_from = cand) %>% ungroup
+}
+
+sc13 <- list3.b[[13]]
+sc14 <- list3.b[[14]]
+sc15 <- list3.b[[15]]
+sc16 <- list3.b[[16]]
+sc17 <- list3.b[[17]]
+sc18 <- list3.b[[18]]
+sc19 <- list3.b[[19]]
+sc20 <- list3.b[[20]]
+sc21 <- list3.b[[21]]
+
+### PR
+
+setwd("~/Desktop/Yoon/Korea Primary/election data/Congressional-PR")
+
+read_pr <- function(file){
+  temp <- read_excel(paste0(file, ".xlsx"))
+  colnames(temp) <- temp[5,]
+  dat <- temp[-c(1:6, seq(7, nrow(temp), 2)), -c(2,3,(ncol(temp)-1),ncol(temp))] 
+  dat <- dat[,colSums(is.na(dat))==0] 
+  colnames(dat)[1] <- "district"
+  dat <- dat %>% mutate(province = substr(file, 1, 2),
+                        congress = substr(file, 3, 4))
+  return(dat)
+}
+
+file_pr <- filenames[file.exists(paste0(filenames, ".xlsx")) == T]
+
+files_list <- list()
+for(j in 17:21) {
+file_pr_loop <- file_pr[str_detect(file_pr, paste(j))]
+list_loop <- list()
+for (i in file_pr_loop) {
+  list_loop[[i]] <- read_pr(i)
+}
+files_list[[j]] <- bind_rows(list_loop) %>% 
+  select(congress, province, district, everything()) %>%
+  arrange(congress, province, district)
+}
+
+pr_vs17 <- files_list[[17]]
+pr_vs18 <- files_list[[18]]
+pr_vs19 <- files_list[[19]]
+pr_vs20 <- files_list[[20]]
+pr_vs21 <- files_list[[21]]
+
+
+######################
+## recode voteshare, incum info
+# honestly idk why i did this
+######################
+
+# smd voteshare
+
+maxn <- function(n) function(x) order(x, decreasing = TRUE)[!is.na(x)][n]
+clean_rank <- function(dat){
+  clean <- dat %>% mutate(vs_fst = apply(dat[,c(4:ncol(dat))], 1, max, na.rm=T),
+                          vs_snd = apply(dat[,c(4:ncol(dat))], 1, function(x) rev(sort(x))[2]),
+                          vs_fst_p = apply(dat[4:ncol(dat)], 1, function(x) names(x)[maxn(1)(x)]),
+                          vs_snd_p = apply(dat[4:ncol(dat)], 1, function(x) names(x)[maxn(2)(x)])) %>%
+    select(congress, province, district, vs_fst, vs_snd, vs_fst_p, vs_snd_p) %>%
+    mutate(w_margin = vs_fst - vs_snd)
+  return(clean)}
+
+list5 <- list()  
+list4 <- list(sv13, sv14, sv15, sv16, sv17, sv18, sv19, sv20, sv21)
+for (i in 1:length(list4)){
+ list5[[i]] <- clean_rank(list4[[i]])
+}
+
+voteshare <- bind_rows(list5)
+
+# smd elect (add incumbent info)
+
+elec <- left_join(elect_smd %>% select(congress, province, district, party, name),
+          voteshare,
+          by = c("congress", "province", "district")) %>%
+  rename(elec_party = party,
+         elec_name = name)
+
+
+##### save files
+#setwd("~/Desktop/Yoon/Korea Primary/election data")
+#write.csv(elect_smd, "elect_smd.csv") # elected legislators profile (smd)
+#write.csv(elect_pr, "elect_pr.csv") # elected legislators profile (pr)
+#write.csv(smd_vs, "smd_vs.csv") # voteshare (smd)
+#write.csv(pr_vs17, "pr_vs17.csv") # voteshare (pr17)
+#write.csv(pr_vs18, "pr_vs18.csv") # voteshare (pr18)
+#write.csv(pr_vs19, "pr_vs19.csv") # voteshare (pr19)
+#write.csv(pr_vs20, "pr_vs20.csv") # voteshare (pr20)
+#write.csv(pr_vs21, "pr_vs21.csv") # voteshare (pr21)
+#write.csv(elec, "elec.csv") #voteshare, incum info
+#library(writexl)
+#write_xlsx(elec, "elec.xlsx")
+
+
+######################
+## merge for analysis
+######################
+
+setwd("~/Desktop/Yoon/Korea Primary/election data/CSM")
+mp <- read_xlsx("elec_mp.xlsx") %>% 
+  rename(congress = elec) %>% arrange(congress, province, district) %>%
+  mutate(n.app = ifelse(is.na(n.app)==T & congress != 21, 0, n.app),
+         inc = ifelse(is.na(inc)==T& congress != 21, 0, inc),
+         for.inc = ifelse(is.na(for.inc)==T & congress != 21, 0, for.inc),
+         cong.exp = ifelse(inc == 1 | for.inc == 1, 1, 0),
+         cong.exp = ifelse(congress == 21, NA, cong.exp)) %>% 
+  mutate(pri1 = case_when(
+    csm %in% c("/단일화경선", "경선", "경선?", "경선(결선)",
+               "경선/단일화경선", "경선공천", "단수후보/단일화경선",
+               "단일화경선", "야권단일화경선", "전략공천/단일화경선") ~ "1",
+    csm %in% c("공천", "단수공천", "단수추천", "단수후보", 
+               "야권연대", "원외단수", "전략검토지역", "전략공천", 
+               "전략선거구", "현역단수") ~ "0", 
+    TRUE ~ csm),
+    pri2 = case_when(
+      csm %in% c("경선", "경선?", "경선(결선)",
+                 "경선/단일화경선", "경선공천") ~ "1",
+      csm %in% c("/단일화경선", "공천", "단수공천", "단수추천",
+                 "단수후보", "단수후보/단일화경선", "단일화경선", 
+                 "야권단일화경선", "야권연대", "원외단수", "전략검토지역",
+                 "전략공천", "전략공천/단일화경선", "전략선거구", "현역단수") ~ "0",
+      TRUE ~ csm)) %>% 
+  select(-c("source", "rf")) %>% 
+  mutate(across(everything(), ~gsub("\\*", "", .x))) %>%
+  mutate_at(c("congress", "n.app", "pri1", "pri2"), .funs = as.numeric) %>%
+  mutate(party_kor = case_when(
+    congress == 19 ~ "민주통합당",
+    congress == 20 ~ "더불어민주당",
+    congress == 21 ~ "더불어민주당")) %>%
+  add_column(party = "mp",
+             party_k21 = "더불어민주당",
+             party_k20 = "더불어민주당",
+             party_k19 = "민주통합당",
+             party_k18 = "통합민주당",
+             party_k17 = "열린우리당",
+             party_k16 = "새천년민주당",
+             party_k15 = "새정치국민회의")
+
+ppp <- read_xlsx("elec_ppp.xlsx") %>% 
+  rename(congress = elec) %>% arrange(congress, province, district) %>%
+  mutate(n.app = ifelse(is.na(n.app)==T, 0, n.app),
+         inc = ifelse(is.na(inc)==T, 0, inc),
+         for.inc = ifelse(is.na(for.inc)==T, 0, for.inc),
+         cong.exp = ifelse(inc == 1 | for.inc == 1, 1, 0)) %>% 
+  mutate(pri1 = case_when(
+    csm %in% c("경선", "경선(국민참여)", "경선(단독후보)", "경선(여론조사)",
+                                  "경선공천", "경선단독후보") ~ "1",
+    csm %in% c("공천", "단독공천", "단수공천", "단수추천", "여성우선추천",
+               "우선추천", "전략공천", "청년공천", "후보자추천", "후보자추천(전략지역)") ~ "0",
+    TRUE ~ csm),
+    pri2 = pri1) %>%
+  select(-c("source", "ref")) %>% 
+  mutate(across(everything(), ~gsub("\\*", "", .x))) %>%
+  mutate_at(c("congress", "n.app", "pri1", "pri2"), .funs = as.numeric) %>%
+  mutate(nominee = case_when(
+    nominee == "X" ~ "NA", 
+    nominee == "김경희(여)" ~ "김경희",
+    nominee == "김희정(여)" ~ "김희정",
+    nominee == "나경원(여)" ~ "나경원",
+    TRUE ~ nominee)) %>%
+  mutate(party_kor = case_when(
+    congress == 19 ~ "새누리당",
+    congress == 20 ~ "새누리당",
+    congress == 21 ~ "미래통합당")) %>%
+  add_column(party = "ppp",
+             party_k21 = "미래통합당",
+             party_k20 = "새누리당",
+             party_k19 = "새누리당",
+             party_k18 = "한나라당",
+             party_k17 = "한나라당",
+             party_k16 = "한나라당",
+             party_k15 = "신한국당")
+
+setwd("~/Desktop/Yoon/Korea Primary/election data/Mapping ")
+mapping <- read_xlsx("mapping.xlsx") %>% 
+  mutate(municipality = case_when(
+  municipality == "세종특별자치시" ~ "세종특별시",
+  municipality == "제주특별자치도" ~ "제주특별시",
+  TRUE ~ municipality
+  )) %>% rename(province_kor = municipality)
+
+setwd("~/Desktop/Yoon/Korea Primary/election data")
+smd_vs <- read.csv("smd_vs.csv") %>% select(-X)
+smd_vs <- smd_vs %>% filter(
+  congress == 15 & party %in% c("새정치국민회의", "신한국당") |
+  congress == 16 & party %in% c("새천년민주당", "한나라당") |
+  congress == 17 & party %in% c("열린우리당", "한나라당") |
+  congress == 18 & party %in% c("통합민주당", "한나라당") |
+  congress == 19 & party %in% c("민주통합당", "새누리당") |
+  congress == 20 & party %in% c("더불어민주당", "새누리당") |
+  congress == 21 & party %in% c("더불어민주당", "미래통합당")
+) %>% mutate(district = case_when(
+  district == "울산시남구갑" ~ "남구갑",
+  district == "울산시남구을" ~ "남구을",
+  district == "울산시동구" ~ "동구",
+  district == "울산시울주구" ~ "울주군",
+  district == "울산시중구" ~ "중구",
+  TRUE ~ district
+)) 
+
+setwd("~/Desktop/Yoon/Korea Primary/election data")
+elect <- read.csv("elec.csv") %>% select(-X) %>% 
+  mutate(province_kor = case_when(
+    province == "bs" ~ "부산광역시",
+    province == "cb" ~ "충청북도",
+    province == "cn" ~ "충청남도",
+    province == "dg" ~ "대구광역시",
+    province == "dj" ~ "대전광역시",
+    province == "gb" ~ "경상북도",
+    province == "gg" ~ "경기도",
+    province == "gj" ~ "광주광역시",
+    province == "gn" ~ "경상남도",
+    province == "gw" ~ "강원도",
+    province == "ic" ~ "인천광역시",
+    province == "jb" ~ "전라북도",
+    province == "jj" ~ "제주특별시",
+    province == "jn" ~ "전라남도",
+    province == "sj" ~ "세종특별시",
+    province == "sl" ~ "서울특별시",
+    province == "us" ~ "울산광역시",
+    TRUE ~ province
+  )) %>% select(congress, province, province_kor, everything()) %>%
+  arrange(congress, province, district) %>% filter(congress > 14) %>%
+  mutate(district = case_when(
+    district == "울산시남구갑" ~ "남구갑",
+    district == "울산시남구을" ~ "남구을",
+    district == "울산시동구" ~ "동구",
+    district == "울산시울주구" ~ "울주군",
+    district == "울산시중구" ~ "중구",
+    TRUE ~ district
+  )) %>%
+  mutate(vs_fst_p = 
+           ifelse(vs_fst_p %in% c("무소속", "무소속.1", "무소속.2", "무소속.3", "무소속.5"), 
+                  "무소속", vs_fst_p))
+
+#2-3 unmatched districts 
+#setdiff(elect$district[elect$congress==15], mapping %>% arrange(province, district15) %>% select(district15) %>% drop_na() %>% pull() )
+#setdiff(elect$district[elect$congress==16], mapping %>% arrange(province, district16) %>% select(district16) %>% drop_na() %>% pull() )
+
+
+## MERGE
+
+# 21 congress
+
+dat <- rbind(ppp, mp)
+dat21 <- left_join(dat %>% filter(congress == 21),
+                   mapping %>% select(-"province_kor"), 
+                   by = c("province" = "province",
+                          "district" = "district21")) %>%
+  # voteshare (20)
+  left_join(., smd_vs %>% filter(congress == 20) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k20" = "party",
+                   "district20" = "district")) %>%
+  # voteshare (19)
+  left_join(., smd_vs %>% filter(congress == 19) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k19" = "party",
+                   "district19" = "district")) %>%
+  # voteshare (18)
+  left_join(., smd_vs %>% filter(congress == 18) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k18" = "party",
+                   "district18" = "district")) %>%  
+  # voteshare (17)
+  left_join(., smd_vs %>% filter(congress == 17) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k17" = "party",
+                   "district17" = "district")) %>%
+  # winparty (20)
+  left_join(., elect %>% filter(congress == 20) %>% select(province, district, elec_party, w_margin),
+            by = c("province" = "province",
+                   "district20" = "district")) %>%
+  # winparty (19)
+  left_join(., elect %>% filter(congress == 19) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district19" = "district")) %>%
+  # winparty (18)
+  left_join(., elect %>% filter(congress == 18) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district18" = "district")) %>%
+  # winparty (17)
+  left_join(., elect %>% filter(congress == 17) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district18" = "district")) %>%
+  # nominee, voteshare (21)
+  left_join(., smd_vs %>% filter(congress == 21) %>% select(-congress),
+            by = c("province" = "province",
+                   "party_kor" = "party",
+                   "district" = "district")) %>% select(-nominee) %>% rename(nominee = cand) %>%
+  # # incumbent race
+  # mutate(inc_race = ifelse(cand1 == elec_name | cand2 == elec_name | cand3 == elec_name |
+  #                            cand4 == elec_name | cand5 == elec_name | nominee == elec_name, 1, 0)) %>%
+  # mutate(inc_race = ifelse(is.na(cand1) == T & is.na(cand2) == T & is.na(cand3) == T &
+  #                            is.na(cand4) == T & is.na(cand5) == T, inc_race, 0)) %>%
+  # prior primary
+  left_join(., dat %>% filter(congress == 20) %>% select(province, party_kor, district, pri1, pri2),
+            by = c("province" = "province",
+                   "party_k20" = "party_kor",
+                   "district20" = "district")) %>%
+  # rename
+  rename(vs_1 = vs.x,
+         vs_2 = vs.y,
+         vs_3 = vs.x.x,
+         vs_4 = vs.y.y,
+         party_1 = elec_party.x,
+         party_2 = elec_party.y,
+         party_3 = elec_party.x.x,
+         party_4 = elec_party.y.y,
+         pri1 = pri1.x,
+         pri2 = pri2.x,
+         prior.pri1 = pri1.y,
+         prior.pri2 = pri2.y) %>%
+  # winning margin
+  mutate(w_margin_1 = ifelse(party_1 == party_k20, w_margin, NA)) %>%
+  # average voteshare
+  rowwise() %>%
+  mutate(na4 = sum(is.na(district20) == F, is.na(district19) == F, is.na(district18) == F, is.na(district17) == F),
+         na3 = sum(is.na(district20) == F, is.na(district19) == F, is.na(district18) == F),
+         na2 = sum(is.na(district20) == F, is.na(district19) == F)) %>%
+  mutate(avg_vs4 = sum(vs_1, vs_2, vs_3, vs_4, na.rm=T)/na4,
+         avg_vs3 = sum(vs_1, vs_2, vs_3, na.rm=T)/na3,
+         avg_vs2 = sum(vs_1, vs_2, na.rm=T)/na2) %>%
+  # clean
+  select(congress, province, district, party, n.app, pri1, pri2,
+         inc, for.inc, cong.exp,
+         vs, prior.pri1, prior.pri2,
+         vs_1, w_margin_1, avg_vs4, avg_vs3, avg_vs2,
+         party_1, party_2, party_3, party_4, na4, na3, na2)
+
+dat21p <- dat21 %>% filter(party == "ppp") %>% 
+  mutate(party_1 = ifelse(party_1 == "새누리당", 1, 0), 
+         party_2 = ifelse(party_2 == "새누리당", 1, 0),
+         party_3 = ifelse(party_3 == "한나라당", 1, 0),
+         party_4 = ifelse(party_4 == "한나라당", 1, 0),
+         win4 = sum(party_1, party_2, party_3, party_4, na.rm=T)/na4,
+         win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
+         win2 = sum(party_1, party_2, na.rm=T)/na2)
+dat21m <- dat21 %>% filter(party == "mp") %>%
+  mutate(party_1 = ifelse(party_1 == "더불어민주당", 1, 0), 
+         party_2 = ifelse(party_2 == "민주통합당", 1, 0),
+         party_3 = ifelse(party_3 == "통합민주당", 1, 0),
+         party_4 = ifelse(party_4 == "열린우리당", 1, 0),
+         win4 = sum(party_1, party_2, party_3, party_4, na.rm=T)/na4,
+         win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
+         win2 = sum(party_1, party_2, na.rm=T)/na2)
+
+data21 <- rbind(dat21p, dat21m) %>% select(-c(party_1, party_2, party_3, party_4, na4, na3, na2))
+  
+  
+## 20 congress
+
+dat20 <- left_join(dat %>% filter(congress == 20),
+                   mapping %>% select(-"province_kor"), 
+                   by = c("province" = "province",
+                          "district" = "district20")) %>%
+  # voteshare (19)
+  left_join(., smd_vs %>% filter(congress == 19) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k19" = "party",
+                   "district19" = "district")) %>%
+  # voteshare (18)
+  left_join(., smd_vs %>% filter(congress == 18) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k18" = "party",
+                   "district18" = "district")) %>%
+  # voteshare (17)
+  left_join(., smd_vs %>% filter(congress == 17) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k17" = "party",
+                   "district17" = "district")) %>%  
+  # voteshare (16)
+  left_join(., smd_vs %>% filter(congress == 16) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k16" = "party",
+                   "district16" = "district")) %>%
+  # winparty (19)
+  left_join(., elect %>% filter(congress == 19) %>% select(province, district, elec_party, w_margin),
+            by = c("province" = "province",
+                   "district19" = "district")) %>%
+  # winparty (18)
+  left_join(., elect %>% filter(congress == 18) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district18" = "district")) %>%
+  # winparty (17)
+  left_join(., elect %>% filter(congress == 17) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district17" = "district")) %>%
+  # winparty (16)
+  left_join(., elect %>% filter(congress == 16) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district16" = "district")) %>%
+  # nominee, voteshare (20)
+  left_join(., smd_vs %>% filter(congress == 20) %>% select(-congress),
+            by = c("province" = "province",
+                   "party_kor" = "party",
+                   "district" = "district")) %>% select(-nominee) %>% rename(nominee = cand) %>%
+  # prior primary
+  left_join(., dat %>% filter(congress == 19) %>% select(province, party_kor, district, pri1, pri2),
+            by = c("province" = "province",
+                   "party_k19" = "party_kor",
+                   "district19" = "district")) %>%
+  # rename
+  rename(vs_1 = vs.x,
+         vs_2 = vs.y,
+         vs_3 = vs.x.x,
+         vs_4 = vs.y.y,
+         party_1 = elec_party.x,
+         party_2 = elec_party.y,
+         party_3 = elec_party.x.x,
+         party_4 = elec_party.y.y,
+         pri1 = pri1.x,
+         pri2 = pri2.x,
+         prior.pri1 = pri1.y,
+         prior.pri2 = pri2.y) %>%
+  # winning margin
+  mutate(w_margin_1 = ifelse(party_1 == party_k19, w_margin, NA)) %>%
+  # average voteshare
+  rowwise() %>%
+  mutate(na4 = sum(is.na(district19) == F, is.na(district18) == F, is.na(district17) == F, is.na(district16) == F),
+         na3 = sum(is.na(district19) == F, is.na(district18) == F, is.na(district17) == F),
+         na2 = sum(is.na(district19) == F, is.na(district18) == F)) %>%
+  mutate(avg_vs4 = sum(vs_1, vs_2, vs_3, vs_4, na.rm=T)/na4,
+         avg_vs3 = sum(vs_1, vs_2, vs_3, na.rm=T)/na3,
+         avg_vs2 = sum(vs_1, vs_2, na.rm=T)/na2) %>%
+  # clean
+  select(congress, province, district, party, n.app, pri1, pri2,
+         inc, for.inc, cong.exp,
+         vs, prior.pri1, prior.pri2,
+         vs_1, w_margin_1, avg_vs4, avg_vs3, avg_vs2,
+         party_1, party_2, party_3, party_4, na4, na3, na2)
+
+dat20p <- dat20 %>% filter(party == "ppp") %>% 
+  mutate(party_1 = ifelse(party_1 == "새누리당", 1, 0), 
+         party_2 = ifelse(party_2 == "한나라당", 1, 0),
+         party_3 = ifelse(party_3 == "한나라당", 1, 0),
+         party_4 = ifelse(party_4 == "한나라당", 1, 0),
+         win4 = sum(party_1, party_2, party_3, party_4, na.rm=T)/na4,
+         win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
+         win2 = sum(party_1, party_2, na.rm=T)/na2)
+dat20m <- dat20 %>% filter(party == "mp") %>%
+  mutate(party_1 = ifelse(party_1 == "민주통합당", 1, 0), 
+         party_2 = ifelse(party_2 == "통합민주당", 1, 0),
+         party_3 = ifelse(party_3 == "열린우리당", 1, 0),
+         party_4 = ifelse(party_4 == "새천년민주당", 1, 0),
+         win4 = sum(party_1, party_2, party_3, party_4, na.rm=T)/na4,
+         win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
+         win2 = sum(party_1, party_2, na.rm=T)/na2)
+
+data20 <- rbind(dat20p, dat20m) %>% select(-c(party_1, party_2, party_3, party_4, na4, na3, na2)) 
+
+
+## 19 congress
+
+dat19 <- left_join(dat %>% filter(congress == 19),
+                   mapping %>% select(-"province_kor"), 
+                   by = c("province" = "province",
+                          "district" = "district19")) %>%
+  # voteshare (18)
+  left_join(., smd_vs %>% filter(congress == 18) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k18" = "party",
+                   "district18" = "district")) %>%
+  # voteshare (17)
+  left_join(., smd_vs %>% filter(congress == 17) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k17" = "party",
+                   "district17" = "district")) %>%
+  # voteshare (16)
+  left_join(., smd_vs %>% filter(congress == 16) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k16" = "party",
+                   "district16" = "district")) %>%  
+  # voteshare (15)
+  left_join(., smd_vs %>% filter(congress == 15) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k15" = "party",
+                   "district15" = "district")) %>%
+  # winparty (18)
+  left_join(., elect %>% filter(congress == 18) %>% select(province, district, elec_party, w_margin),
+            by = c("province" = "province",
+                   "district18" = "district")) %>%
+  # winparty (17)
+  left_join(., elect %>% filter(congress == 17) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district17" = "district")) %>%
+  # winparty (16)
+  left_join(., elect %>% filter(congress == 16) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district16" = "district")) %>%
+  # winparty (15)
+  left_join(., elect %>% filter(congress == 15) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district15" = "district")) %>%
+  # nominee, voteshare (19)
+  left_join(., smd_vs %>% filter(congress == 19) %>% select(-congress),
+            by = c("province" = "province",
+                   "party_kor" = "party",
+                   "district" = "district")) %>% select(-nominee) %>% rename(nominee = cand) %>%
+  # prior primary
+  left_join(., dat %>% filter(congress == 18) %>% select(province, party_kor, district, pri1, pri2),
+            by = c("province" = "province",
+                   "party_k18" = "party_kor",
+                   "district18" = "district")) %>%
+  # rename
+  rename(vs_1 = vs.x,
+         vs_2 = vs.y,
+         vs_3 = vs.x.x,
+         vs_4 = vs.y.y,
+         party_1 = elec_party.x,
+         party_2 = elec_party.y,
+         party_3 = elec_party.x.x,
+         party_4 = elec_party.y.y,
+         pri1 = pri1.x,
+         pri2 = pri2.x,
+         prior.pri1 = pri1.y,
+         prior.pri2 = pri2.y) %>%
+  # winning margin
+  mutate(w_margin_1 = ifelse(party_1 == party_k18, w_margin, NA)) %>%
+  # average voteshare
+  rowwise() %>%
+  mutate(na4 = sum(is.na(district18) == F, is.na(district17) == F, is.na(district16) == F, is.na(district15) == F),
+         na3 = sum(is.na(district18) == F, is.na(district17) == F, is.na(district16) == F),
+         na2 = sum(is.na(district18) == F, is.na(district17) == F)) %>%
+  mutate(avg_vs4 = sum(vs_1, vs_2, vs_3, vs_4, na.rm=T)/na4,
+         avg_vs3 = sum(vs_1, vs_2, vs_3, na.rm=T)/na3,
+         avg_vs2 = sum(vs_1, vs_2, na.rm=T)/na2) %>%
+  # clean
+  select(congress, province, district, party, n.app, pri1, pri2,
+         inc, for.inc, cong.exp,
+         vs, prior.pri1, prior.pri2,
+         vs_1, w_margin_1, avg_vs4, avg_vs3, avg_vs2,
+         party_1, party_2, party_3, party_4, na4, na3, na2)
+
+dat19p <- dat19 %>% filter(party == "ppp") %>% 
+  mutate(party_1 = ifelse(party_1 == "한나라당", 1, 0), 
+         party_2 = ifelse(party_2 == "한나라당", 1, 0),
+         party_3 = ifelse(party_3 == "한나라당", 1, 0),
+         party_4 = ifelse(party_4 == "신한국당", 1, 0),
+         win4 = sum(party_1, party_2, party_3, party_4, na.rm=T)/na4,
+         win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
+         win2 = sum(party_1, party_2, na.rm=T)/na2)
+dat19m <- dat19 %>% filter(party == "mp") %>%
+  mutate(party_1 = ifelse(party_1 == "통합민주당", 1, 0), 
+         party_2 = ifelse(party_2 == "열린우리당", 1, 0),
+         party_3 = ifelse(party_3 == "새천년민주당", 1, 0),
+         party_4 = ifelse(party_4 == "새정치국민회의", 1, 0),
+         win4 = sum(party_1, party_2, party_3, party_4, na.rm=T)/na4,
+         win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
+         win2 = sum(party_1, party_2, na.rm=T)/na2)
+
+data19 <- rbind(dat19p, dat19m) %>% select(-c(party_1, party_2, party_3, party_4, na4, na3, na2))
+
+data <- data.frame(rbind(data19, data20, data21)) %>% mutate_all(function(x) ifelse(is.nan(x), NA, x))
+
+#setwd("~/Desktop/Yoon/Korea Primary/election data")
+#write.csv(data, "clean_data.csv")
+
+################
+## Analysis
+################
+
+setwd("~/Desktop/Yoon/Korea Primary/election data")
+data <- read.csv("clean_data.csv") %>% mutate(
+  prior.pri1 = ifelse(congress == 19, 0, prior.pri1),
+  prior.pri2 = ifelse(congress == 19, 0, prior.pri2)) %>%
+  mutate(ruling = case_when(
+    congress == 19 & party == "ppp" ~ 1, 
+    congress == 20 & party == "ppp" ~ 1,
+    congress == 21 & party == "mp" ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate_at(c("inc", "for.inc", "cong.exp"), .funs=as.numeric)
+
+# for csm: pri2 seems to be more accurate? (esp for mp 19)
+# pri1 includes coalition cases pri2 doesn't
+
+##### descriptive stats
+
+#---------------------------------------------
+# turnover of CSMs
+#---------------------------------------------
+data_csm <- data %>% filter(congress == 21) %>% select(congress, province, district, party, pri2, prior.pri2) %>%
+  left_join(mapping %>% select(province, district21, district19), 
+            by = c("province" = "province",
+                   "district" = "district21")) %>%
+  left_join(data %>% filter(congress == 19) %>% select(province, district, party, pri2),
+            by = c("province" = "province",
+                   "district19" = "district",
+                   "party" = "party")) %>%
+  rename(pri21 = pri2.x,
+         pri20 = prior.pri2,
+         pri19 = pri2.y) %>% select(province, district, party, pri21, pri20, pri19)
+
+data_csm %>% group_by(party) %>%
+  summarize(pri3 = sum(pri21 == 1 & pri20 ==1 & pri19 ==1, na.rm=T),
+            pri2 = sum(pri21 == 1 & pri20 == 1 | pri20 == 1 & pri19 ==1, na.rm=T),
+            pri3p = pri3/256,
+            pri2p = pri2/256)
+
+#---------------------------------------------
+
+#---------------------------------------------
+# CSM over years (based on pri2 for 19-21 congress)
+#---------------------------------------------
+
+year <- c(2004, 2008, 2012, 2016, 2020)
+congress <- c(17, 18, 19, 20, 21)
+ppp_close <- c(184, 245, 182, 110, 142)
+ppp_open <- c(28, 0, 48, 141, 93)
+ppp <- as.data.frame(cbind(year, congress, ppp_close, ppp_open)) %>%
+  mutate(party = "ppp") %>% mutate(close = ppp_close,
+                                   open = ppp_open) %>% select(-c(ppp_close, ppp_open))
+
+mp_close <- c(160, 202, 130, 181, 144)
+mp_open <- c(83, 0, 89, 57, 109)
+mp <- as.data.frame(cbind(year, congress, mp_close, mp_open)) %>%
+  mutate(party = "mp") %>% mutate(close = mp_close,
+                                  open = mp_open) %>% select(-c(mp_close, mp_open))
+
+csm <- rbind(ppp, mp) %>% mutate(pct.open = open/(open+close)*100,
+                                 pct.close = close/(open+close)*100) 
+
+all <- csm %>% group_by(year, congress) %>% summarize(close = sum(close), open = sum(open)) %>%
+  mutate(pct.open = open/(open+close)*100,
+         pct.close = close/(open+close)*100,
+         party = "average") 
+
+csm <- rbind(csm, all) 
+csm$year <- as.factor(csm$year)
+
+csm %>% filter(year != "2008") %>%
+  ggplot(., aes(year, pct.open, group = as.factor(party))) +
+  geom_line(linetype = "dotted", aes(color = as.factor(party))) + 
+  geom_point(aes(color = as.factor(party))) +
+  scale_color_manual(name = "Party",
+                     labels = c("Average", "MP", "PPP"),
+                     values=c("darkgrey","cadetblue", "violetred")) +
+  xlab("Election Year") + 
+  ylab("% of Primaries") +
+  theme(legend.position = "bottom",
+        plot.caption = element_text(hjust = 0, face= "italic"),
+        plot.title.position = "plot",
+        plot.caption.position = "plot")
+
+ggsave("primary_years.png", plot = last_plot(),
+       width = 6, height = 4)
+#---------------------------------------------
+
+
+#---------------------------------------------
+# Margin of victory
+#---------------------------------------------
+
+# data <- data %>% mutate(
+#   w_margin = ifelse(is.na(vs_1)==F & is.na(w_margin_1)==T, 0, w_margin_1))
+
+quantile(data$w_margin_1, na.rm=T) # 23(25%)
+quantile(data$w_margin_1, probs = seq(0, 1, 0.1), na.rm=T) # 20(30%)/26(20%) 
+
+# 25%/30%/20%
+quantile(data$w_margin_1[data$party=="ppp" & data$congress == 19], seq(0, 1, 0.1), na.rm=T) #31/30/34
+quantile(data$w_margin_1[data$party=="ppp" & data$congress == 20], seq(0, 1, 0.1), na.rm=T) #25/21/30
+quantile(data$w_margin_1[data$party=="ppp" & data$congress == 21], seq(0, 1, 0.1), na.rm=T) #23/21/26
+
+quantile(data$w_margin_1[data$party=="mp" & data$congress == 19], seq(0, 1, 0.1), na.rm=T) #39/23/43
+quantile(data$w_margin_1[data$party=="mp" & data$congress == 20], seq(0, 1, 0.1), na.rm=T) #20/17/22
+quantile(data$w_margin_1[data$party=="mp" & data$congress == 21], seq(0, 1, 0.1), na.rm=T) #14/13/16
+
+ggplot(data, aes(w_margin_1)) + geom_histogram(fill = "lightgrey", color = "darkgrey") +
+  geom_vline(xintercept = 23, linetype = "dotted") + 
+  xlab("Margin of Victory") + ylab("Count") + 
+  theme(plot.caption = element_text(hjust = 0, face= "italic"),
+        plot.title.position = "plot",
+        plot.caption.position = "plot")
+
+ggsave("margin_victory.png", plot = last_plot(),
+       width = 6, height = 4)
+
+
+data <- data %>% mutate(
+  mar23 = ifelse(w_margin_1 >= 23, 1, 0),
+  mar30 = ifelse(w_margin_1 >= 20, 1, 0),
+  mar20 = ifelse(w_margin_1 >= 26, 1, 0)) %>%
+  mutate(mar23p = ifelse(is.na(vs_1)==F & is.na(mar23)==T, 0, mar23)) %>%
+  mutate(mar23 = ifelse(is.na(mar23)==T, 0, mar23),
+         mar30 = ifelse(is.na(mar30)==T, 0, mar30),
+         mar20 = ifelse(is.na(mar20)==T, 0, mar20)) %>%
+  mutate(mar25p = case_when(
+          party == "ppp" & congress == 19 & w_margin_1 >= 31 ~ 1,
+          party == "ppp" & congress == 20 & w_margin_1 >= 25 ~ 1,
+          party == "ppp" & congress == 21 & w_margin_1 >= 23 ~ 1,
+          party == "mp" & congress == 19 & w_margin_1 >= 39 ~ 1,
+          party == "mp" & congress == 20 & w_margin_1 >= 20 ~ 1,
+          party == "mp" & congress == 21 & w_margin_1 >= 14 ~ 1,
+          TRUE ~ 0),
+         mar30p = case_when(
+           party == "ppp" & congress == 19 & w_margin_1 >= 30 ~ 1,
+           party == "ppp" & congress == 20 & w_margin_1 >= 21 ~ 1,
+           party == "ppp" & congress == 21 & w_margin_1 >= 21 ~ 1,
+           party == "mp" & congress == 19 & w_margin_1 >= 23 ~ 1,
+           party == "mp" & congress == 20 & w_margin_1 >= 17 ~ 1,
+           party == "mp" & congress == 21 & w_margin_1 >= 13 ~ 1,
+           TRUE ~ 0),
+         mar20p = case_when(
+           party == "ppp" & congress == 19 & w_margin_1 >= 34 ~ 1,
+           party == "ppp" & congress == 20 & w_margin_1 >= 30 ~ 1,
+           party == "ppp" & congress == 21 & w_margin_1 >= 26 ~ 1,
+           party == "mp" & congress == 19 & w_margin_1 >= 43 ~ 1,
+           party == "mp" & congress == 20 & w_margin_1 >= 22 ~ 1,
+           party == "mp" & congress == 21 & w_margin_1 >= 16 ~ 1,
+           TRUE ~ 0)) %>% 
+  mutate(vs_1_p = vs_1/100,
+         avg_vs4_p = avg_vs4/100)
+
+# continuous variable
+data <- data %>% mutate(mar_cont = ifelse(is.na(vs_1)==F & is.na(w_margin_1)==T, 0, w_margin_1),
+                        mar_cont2 = ifelse(is.na(mar_cont)==T, 0, mar_cont),
+                        mar_cont = mar_cont/100,
+                        mar_cont2 = mar_cont2/100)
+
+#---------------------------------------------
+
+
+
+#---------------------------------------------
+# number of appplicants 
+#---------------------------------------------
+
+safe <- prop.table(table(data$n.app[data$mar23==1]))
+unsafe <- prop.table(table(data$n.app[data$mar23==0]))
+
+safe <- data.frame(safe) %>% mutate(safe = 1)
+unsafe <- data.frame(unsafe) %>% mutate(safe = 0)
+dist <- rbind(safe, unsafe)
+
+ggplot(dist, aes(Var1, Freq, group = as.factor(safe))) + 
+  geom_line(stat="identity", linetype = "dotted", aes(Var1, Freq, color = as.factor(safe))) + 
+  geom_point(aes(color = as.factor(safe))) +
+  scale_color_manual(name = "Type of District",
+                     labels = c("Non-safe", "Safe"),
+                     values = c("grey", "cadetblue")) +
+  xlab("Number of Applicants") + ylab("Share of Districts") + 
+  theme(legend.position = "bottom") 
+
+ggsave("num_apps.png", plot = last_plot(),
+       width = 6, height = 4)
+
+#---------------------------------------------
+
+
+
+#---------------------------------------------
+# Summary Stats
+#---------------------------------------------
+
+data %>%
+  select(pri2, n.app, vs_1_p, avg_vs4_p, mar_cont2, win4, inc, ruling) %>% 
+  as.data.frame(.) %>% 
+  stargazer(., 
+            title = "Summary Statistics",
+            header = F, float = T,
+            summary.stat = c("min","median", "max", "mean", "sd", "n"),
+            font.size = 'footnotesize', 
+            covariate.labels = c("Primary", "Number of Applicants", "Vote Share (previous)", 
+                       "Vote Share (previous 4 avg)", "Winning Margin",
+                       "Share of Wins", "Incumbency", "Ruling Party"))
+
+#---------------------------------------------
+
+
+#---------------------------------------------
+# Power analysis
+#---------------------------------------------
+# r1 <- cor(data$inc*data$vs_1, data$pri2, use = "complete.obs")
+# r2 <- cor(data$inc, data$pri2, use="complete.obs")
+# r3 <- cor(data$vs_1, data$pri2, use="complete.obs")
+# r4 <- cor(data$vs_1, data$inc, use="complete.obs")
+# 
+# library(InteractionPoweR)
+# 
+# test_power<-power_interaction_r2(
+#   alpha = 0.05,             # alpha, for the power analysis
+#   N = 1119,                  # sample size
+#   r.x1x2.y = -0.01136643,           # interaction effect to test (correlation between x1*x2 and y)
+#   r.x1.y = 0.01108555,              # correlation between x1 and y
+#   r.x2.y = 0.07196628,              # correlation between x2 and y
+#   r.x1.x2 = 0.4645919              # correlation between x1 and x2
+# )
+# 
+# test_power
+#---------------------------------------------
+
+
+#---------------------------------------------
+# Analysis: effect of safeness on csm
+#---------------------------------------------
+feols(pri2 ~ vs_1_p | district + congress + party, data)
+feols(pri2 ~ avg_vs4_p | district + congress + party, data)
+feols(pri2 ~ mar23 | district + congress + party, data)
+feols(pri2 ~ win4 | district + congress + party, data)
+feols(pri2 ~ mar_cont2 | district + congress + party, data)
+
+feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
+feols(pri2 ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data)
+feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data)
+
+#---------------------------------------------
+
+
+#---------------------------------------------
+# Analysis: effect of safeness on n.app
+#---------------------------------------------
+feols(n.app ~ vs_1_p | district + congress + party, data)
+feols(n.app ~ avg_vs4_p | district + congress + party, data)
+feols(n.app ~ mar23 | district + congress + party, data)
+feols(n.app ~ win4 | district + congress + party, data)
+feols(n.app ~ mar_cont2 | district + congress + party, data)
+
+feols(n.app ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
+feols(n.app ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data)
+feols(n.app ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data)
+#---------------------------------------------
+
+
+
+#---------------------------------------------
+# coefficient plot: main
+#---------------------------------------------
+library(broom)
+library(dotwhisker)
+
+vs1 <- tidy(feols(pri2 ~ vs_1_p | district + congress + party, data), conf.int = T)
+vs4 <- tidy(feols(pri2 ~ avg_vs4_p | district + congress + party, data), conf.int = T)
+mar <- tidy(feols(pri2 ~ mar23 | district + congress + party, data), conf.int = T)
+win <- tidy(feols(pri2 ~ win4 | district + congress + party, data), conf.int = T)
+
+vs1_c <- tidy(feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
+mar_c <- tidy(feols(pri2 ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
+
+plot_iv <- data.frame(rbind(vs1, vs4, win, mar))
+plot_c <- data.frame(rbind(vs1_c, mar_c)) %>% filter(term %in% c("vs_1_p", "mar23"))
+plot <- rbind(plot_iv %>% mutate(model = "basic"),
+              plot_c %>% mutate(model = "w/controls"))
+
+dwplot(plot,
+       vars_order = c("vs_1_p", "avg_vs4_p", "mar23", "win4"),
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(vs_1_p = "Vote Share \n (previous election)",
+                       avg_vs4_p = "Vote Share \n (previous 4 avg)",
+                       mar23 = "Margin of Victory \n (23%)",
+                       win4 = "Share of Wins")) +
+  xlab("Probability of Primaries") + ylab("") +
+  geom_vline(xintercept=0, linetype=3) +
+  ggtitle("") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom") 
+
+ggsave("main.png", plot = last_plot(),
+       width = 6, height = 4)
+
+
+# with margin as continuous variable
+mar_ct <- tidy(feols(pri2 ~ mar_cont2 | district + congress + party, data), conf.int = T)
+mar_ct2 <- tidy(feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
+
+plot_iv <- data.frame(rbind(vs1, vs4, win, mar_ct))
+plot_c <- data.frame(rbind(vs1_c, mar_ct2)) %>% filter(term %in% c("vs_1_p", "mar_cont2"))
+plot <- rbind(plot_iv %>% mutate(model = "basic"),
+              plot_c %>% mutate(model = "w/controls"))
+
+dwplot(plot,
+       vars_order = c("vs_1_p", "avg_vs4_p", "mar_cont2", "win4"),
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(vs_1_p = "Vote Share \n (previous election)",
+                       avg_vs4_p = "Vote Share \n (previous 4 avg)",
+                       mar_cont2 = "Margin of Victory",
+                       win4 = "Share of Wins")) +
+  xlab("Probability of Primaries") + ylab("") +
+  geom_vline(xintercept=0, linetype=3) +
+  ggtitle("") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom") 
+
+ggsave("main_cont.png", plot = last_plot(),
+       width = 6, height = 4)
+#---------------------------------------------
+
+
+#---------------------------------------------
+# coefficient plot: n.app
+#---------------------------------------------
+vs1.n <- tidy(feols(n.app ~ vs_1_p | district + congress + party, data), conf.int = T)
+vs4.n <- tidy(feols(n.app ~ avg_vs4_p | district + congress + party, data), conf.int = T)
+mar.n <- tidy(feols(n.app ~ mar23 | district + congress + party, data), conf.int = T)
+win.n <- tidy(feols(n.app ~ win4 | district + congress + party, data), conf.int = T)
+
+vs1_c.n <- tidy(feols(n.app ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
+mar_c.n <- tidy(feols(n.app ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
+
+plot_iv.n <- data.frame(rbind(vs1.n, vs4.n, win.n, mar.n))
+plot_c.n <- data.frame(rbind(vs1_c.n, mar_c.n)) %>% filter(term %in% c("vs_1_p", "mar23"))
+plot.n <- rbind(plot_iv.n %>% mutate(model = "basic"),
+              plot_c.n %>% mutate(model = "w/controls"))
+
+dwplot(plot.n,
+       vars_order = c("vs_1_p", "avg_vs4_p", "mar23", "win4"),
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(vs_1_p = "Vote Share \n (previous election)",
+                       avg_vs4_p = "Vote Share \n (previous 4 avg)",
+                       mar23 = "Margin of Victory \n (23%)",
+                       win4 = "Share of Wins")) +
+  xlab("Effect on Number of Applicants") + ylab("") +
+  geom_vline(xintercept=0, linetype=3) +
+  ggtitle("") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom") 
+
+ggsave("mech.png", plot = last_plot(),
+       width = 6, height = 4)
+
+
+# with margin as continuous
+mar.nc <- tidy(feols(n.app ~ mar_cont2 | district + congress + party, data), conf.int = T)
+mar_c.nc2 <- tidy(feols(n.app ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
+
+plot_iv.n <- data.frame(rbind(vs1.n, vs4.n, win.n, mar.nc))
+plot_c.n <- data.frame(rbind(vs1_c.n, mar_c.nc2)) %>% filter(term %in% c("vs_1_p", "mar_cont2"))
+plot.n <- rbind(plot_iv.n %>% mutate(model = "basic"),
+                plot_c.n %>% mutate(model = "w/controls"))
+
+dwplot(plot.n,
+       vars_order = c("vs_1_p", "avg_vs4_p", "mar_cont2", "win4"),
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(vs_1_p = "Vote Share \n (previous election)",
+                       avg_vs4_p = "Vote Share \n (previous 4 avg)",
+                       mar_cont2 = "Margin of Victory",
+                       win4 = "Share of Wins")) +
+  xlab("Effect on Number of Applicants") + ylab("") +
+  geom_vline(xintercept=0, linetype=3) +
+  ggtitle("") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom") 
+
+ggsave("mech_cont.png", plot = last_plot(),
+       width = 6, height = 4)
+
+#---------------------------------------------
+
+
+#---------------------------------------------
+# logistic regression
+#---------------------------------------------
+pri <- mean(data$prior.pri2, na.rm=T)
+ruling <- mean(data$ruling, na.rm=T)
+inc <- mean(data$inc, na.rm=T)
+
+log <- glm(pri2 ~ avg_vs4_p + prior.pri2 + inc + ruling + factor(congress) + factor(party), 
+           data, family = binomial(link=logit))
+
+log_predict <- function(cong, part, yr){
+  range <- data.frame(avg_vs4_p = c(seq(0, 0.8, by=0.05)),
+                      congress = cong,
+                      party = part,
+                      prior.pri2 =  pri,
+                      ruling = ruling,
+                      inc = inc)
+  
+  pred <- predict(log, range, type = "response", se.fit=T)
+  upper <- pred$fit + 1.96*pred$se.fit
+  lower <- pred$fit - 1.96*pred$se.fit
+  
+  pred_fit <- data.frame(cbind(pred$fit, lower, upper)) %>%
+    mutate(range = seq(0, 0.8, by=0.05)) %>%
+    mutate(party = part,
+           year = yr)
+  
+  return(pred_fit)
+}
+
+log19m <- log_predict(cong = 19, part = "mp", yr = 2012)
+log20m <- log_predict(cong = 20, part = "mp", yr = 2016)
+log21m <- log_predict(cong = 21, part = "mp", yr = 2020)
+log19p <- log_predict(cong = 19, part = "ppp", yr = 2012)
+log20p <- log_predict(cong = 20, part = "ppp", yr = 2016)
+log21p <- log_predict(cong = 21, part = "ppp", yr = 2020)
+
+pred <- rbind(log19m, log20m, log21m, log19p, log20p, log21p) %>%
+  mutate(party = ifelse(party == "mp", "MP", "PPP"))
+
+
+log_rug <- data %>% select(avg_vs4_p, party, congress) %>% filter(avg_vs4_p <= 0.80) %>%
+  mutate(year = ifelse(congress == 19, 2012, 
+                       ifelse(congress == 20, 2016, 2020)),
+         party = ifelse(party == "mp", "MP", "PPP")) 
+
+ggplot(pred, aes(range, V1)) + geom_point(aes(color = party), size = 0.5) +
+  geom_errorbar(pred, mapping = aes(ymin = lower, ymax = upper, color = party), width=0.01) + 
+  xlab("Vote Share") + ylab("Probability of Primary") + 
+  xlim(0, 0.8) + scale_x_continuous(breaks = seq(0, 0.8, by = 0.1)) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  facet_grid(cols = vars(party), rows = vars(year)) + 
+  scale_color_manual(name = "Party",
+                     labels = c("MP", "PPP"),
+                     values=c("cadetblue","violetred")) +
+  theme(legend.position = "none",
+        plot.caption = element_text(hjust = 0, face= "italic"),
+        plot.title.position = "plot",
+        plot.caption.position = "plot") +
+  geom_rug(log_rug, mapping= aes(x=avg_vs4_p, y=NULL), inherit.aes=FALSE, sides = "b", col = "darkgrey") #+
+
+ggsave("log.png", plot = last_plot(),
+       width = 4, height = 6)
+#---------------------------------------------
+
+
+
+#---------------------------------------------
+# regression table
+#---------------------------------------------
+
+a <- feols(pri2 ~ vs_1_p | district + congress + party, data)
+b <- feols(pri2 ~ avg_vs4_p | district + congress + party, data)
+c <- feols(pri2 ~ mar23 | district + congress + party, data)
+d <- feols(pri2 ~ win4 | district + congress + party, data)
+e <- feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
+f <- feols(pri2 ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data)
+h <- feols(pri2 ~ mar_cont2 | district + congress + party, data)
+i <- feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data)
+
+etable(a, b, h, d, e, i,
+       title = "Safeness of District and Probability of Primary",
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(vs_1_p = "Previous Voteshare", avg_vs4_p = "Avg Voteshare",
+              mar_cont2 = "Winning Margin", win4 = "Share of Wins",
+              prior.pri2 = "Prior Primary", inc = "Incumbency",
+              ruling = "Ruling Party", 
+              pri2 = "Primary"))
+
+g <- feols(n.app ~ vs_1_p | district + congress + party, data)
+h <- feols(n.app ~ avg_vs4_p | district + congress + party, data)
+i <- feols(n.app ~ mar23 | district + congress + party, data)
+j <- feols(n.app ~ win4 | district + congress + party, data)
+k <- feols(n.app ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
+l <- feols(n.app ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data)
+m <- feols(n.app ~ mar_cont2 | district + congress + party, data)
+n <- feols(n.app ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data)
+
+etable(g, h, m, j, k, n,
+       title = "Safeness of District and Number of Applicants",
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(vs_1_p = "Previous Voteshare", avg_vs4_p = "Avg Voteshare",
+              mar_cont2 = "Winning Margin", win4 = "Share of Wins",
+              prior.pri2 = "Prior Primary", inc = "Incumbency",
+              ruling = "Ruling Party", 
+              n.app = "Number of Applicants"))
+
+#---------------------------------------------
+
+
+
+#---------------------------------------------
+# robustness checks
+#---------------------------------------------
+data <- data %>% mutate(
+  avg_vs2p = avg_vs2/100,
+  avg_vs3p = avg_vs3/100
+)
+ 
+# avg 2, 3
+a1 <- feols(pri2 ~ avg_vs2p | district + congress + party, data)
+a2 <- feols(pri2 ~ avg_vs3p | district + congress + party, data)
+
+etable(a1, a2,
+       title = "",
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(win2 = "Avg Voteshare (prev 2)", win3 = "Avg Voteshare (prev 3)",
+              pri2 = "Primary"))
+
+# win 2, 3
+w1 <- feols(pri2 ~ win2 | district + congress + party, data)
+w2 <- feols(pri2 ~ win3 | district + congress + party, data)
+
+etable(w1, w2,
+       title = "",
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(win2 = "Share of Wins (prev 2)", win3 = "Share of Wins (prev 3)",
+              pri2 = "Primary"))
+
+# dichotomos: mar20, 23 30
+m1 <- feols(pri2 ~ mar20 | district + congress + party, data)
+m2 <- feols(pri2 ~ mar23 | district + congress + party, data)
+m3 <- feols(pri2 ~ mar30 | district + congress + party, data)
+m4 <- feols(pri2 ~ mar20 + prior.pri2 + inc + ruling | district + congress + party, data)
+m5 <- feols(pri2 ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data)
+m6 <- feols(pri2 ~ mar30 + prior.pri2 + inc + ruling | district + congress + party, data)
+
+etable(m1, m2, m3, m4, m5, m6,
+       title = "",
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(mar20 = "Winning Margin (20%)", mar23 = "Winning Margin (25%)",
+              mar30 = "Winning Margin (30%)",
+              prior.pri2 = "Prior Primary", inc = "Incumbency",
+              ruling = "Ruling Party",
+              pri2 = "Primary"))
+
+
+m1.c <- tidy(m1, conf.int = T)
+m2.c <- tidy(m2, conf.int = T)
+m3.c <- tidy(m3, conf.int = T)
+m4.c <- tidy(m4, conf.int = T)
+m5.c <- tidy(m5, conf.int = T)
+m6.c <- tidy(m6, conf.int = T)
+
+plot_c1 <- data.frame(rbind(m1.c, m2.c, m3.c))
+plot_c2 <- data.frame(rbind(m4.c, m5.c, m6.c)) %>% filter(term %in% c("mar20", "mar23", "mar30"))
+plot.c <- rbind(plot_c1 %>% mutate(model = "basic"),
+                plot_c2 %>% mutate(model = "w/controls"))
+
+dwplot(plot.c,
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(mar20 = "Margin of Victory \n (20%)",
+                       mar23 = "Margin of Victory \n (25%)",
+                       mar30 = "Margin of Victory \n (30%)")) +
+  xlab("Probability of Primaries") + ylab("") +
+  geom_vline(xintercept=0, linetype=3) +
+  ggtitle("") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom") 
+
+ggsave("thres_binary.png", plot = last_plot(),
+       width = 6, height = 4)
+#---------------------------------------------
+
+library(rgdal)
 ```
-
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
-```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
