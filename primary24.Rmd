@@ -5,19 +5,22 @@ date: "2024-03-19"
 output: html_document
 ---
 
+Seems like the cleaned data (up to line 715) is saved as clean_data.csv. can start from there.
+
+## Data cleaning
+
 ```{r}
 library(readxl)
 library(tidyverse)
 library(ggplot2)
 library(stargazer)
 library(fixest)
-library(dplyr)
 
 #####################
 ## incumbent profile
 #####################
 
-setwd("~/Desktop/Yoon/Korea Primary/election data/Congressional-elect(charac)")
+setwd("/Users/hyoon/Desktop/Yoon2/primary/election data/Congressional-elect(charac)")
 
 province <- c("bs", "cb", "cn", "dg", "dj", "gb", "gg", "gj", "gn", "gw",
               "ic", "jb", "jj", "jn", "sj", "sl", "us")
@@ -88,7 +91,7 @@ elect_pr <- bind_rows(list2) %>%
 
 ### SMD
 
-setwd("~/Desktop/Yoon/Korea Primary/election data/Congressional-SMD")
+setwd("/Users/hyoon/Desktop/Yoon2/primary/election data/Congressional-SMD")
 
 read_vs <- function(file){
   temp <- read_excel(paste0(file, ".xlsx"))
@@ -164,7 +167,7 @@ sc21 <- list3.b[[21]]
 
 ### PR
 
-setwd("~/Desktop/Yoon/Korea Primary/election data/Congressional-PR")
+setwd("/Users/hyoon/Desktop/Yoon2/primary/election data/Congressional-PR")
 
 read_pr <- function(file){
   temp <- read_excel(paste0(file, ".xlsx"))
@@ -251,7 +254,8 @@ elec <- left_join(elect_smd %>% select(congress, province, district, party, name
 ## merge for analysis
 ######################
 
-setwd("~/Desktop/Yoon/Korea Primary/election data/CSM")
+setwd("/Users/hyoon/Desktop/Yoon2/primary/election data/CSM")
+
 mp <- read_xlsx("elec_mp.xlsx") %>% 
   rename(congress = elec) %>% arrange(congress, province, district) %>%
   mutate(n.app = ifelse(is.na(n.app)==T & congress != 21, 0, n.app),
@@ -326,7 +330,8 @@ ppp <- read_xlsx("elec_ppp.xlsx") %>%
              party_k16 = "한나라당",
              party_k15 = "신한국당")
 
-setwd("~/Desktop/Yoon/Korea Primary/election data/Mapping ")
+
+setwd("/Users/hyoon/Desktop/Yoon2/primary/election data/Mapping ")
 mapping <- read_xlsx("mapping.xlsx") %>% 
   mutate(municipality = case_when(
   municipality == "세종특별자치시" ~ "세종특별시",
@@ -334,7 +339,8 @@ mapping <- read_xlsx("mapping.xlsx") %>%
   TRUE ~ municipality
   )) %>% rename(province_kor = municipality)
 
-setwd("~/Desktop/Yoon/Korea Primary/election data")
+
+setwd("/Users/hyoon/Desktop/Yoon2/primary/election data")
 smd_vs <- read.csv("smd_vs.csv") %>% select(-X)
 smd_vs <- smd_vs %>% filter(
   congress == 15 & party %in% c("새정치국민회의", "신한국당") |
@@ -353,7 +359,6 @@ smd_vs <- smd_vs %>% filter(
   TRUE ~ district
 )) 
 
-setwd("~/Desktop/Yoon/Korea Primary/election data")
 elect <- read.csv("elec.csv") %>% select(-X) %>% 
   mutate(province_kor = case_when(
     province == "bs" ~ "부산광역시",
@@ -710,12 +715,16 @@ data <- data.frame(rbind(data19, data20, data21)) %>% mutate_all(function(x) ife
 
 #setwd("~/Desktop/Yoon/Korea Primary/election data")
 #write.csv(data, "clean_data.csv")
+```
 
+
+## Analysis
+```{r}
 ################
 ## Analysis
 ################
 
-setwd("~/Desktop/Yoon/Korea Primary/election data")
+setwd("/Users/hyoon/Desktop/Yoon2/primary/election data")
 data <- read.csv("clean_data.csv") %>% mutate(
   prior.pri1 = ifelse(congress == 19, 0, prior.pri1),
   prior.pri2 = ifelse(congress == 19, 0, prior.pri2)) %>%
@@ -759,16 +768,16 @@ data_csm %>% group_by(party) %>%
 # CSM over years (based on pri2 for 19-21 congress)
 #---------------------------------------------
 
-year <- c(2004, 2008, 2012, 2016, 2020)
-congress <- c(17, 18, 19, 20, 21)
-ppp_close <- c(184, 245, 182, 110, 142)
-ppp_open <- c(28, 0, 48, 141, 93)
+year <- c(2004, 2008, 2012, 2016, 2020, 2024)
+congress <- c(17, 18, 19, 20, 21, 22)
+ppp_close <- c(184, 245, 182, 110, 142, 164)
+ppp_open <- c(28, 0, 48, 141, 93, 85)
 ppp <- as.data.frame(cbind(year, congress, ppp_close, ppp_open)) %>%
   mutate(party = "ppp") %>% mutate(close = ppp_close,
                                    open = ppp_open) %>% select(-c(ppp_close, ppp_open))
 
-mp_close <- c(160, 202, 130, 181, 144)
-mp_open <- c(83, 0, 89, 57, 109)
+mp_close <- c(160, 202, 130, 181, 144, 147)
+mp_open <- c(83, 0, 89, 57, 109, 97)
 mp <- as.data.frame(cbind(year, congress, mp_close, mp_open)) %>%
   mutate(party = "mp") %>% mutate(close = mp_close,
                                   open = mp_open) %>% select(-c(mp_close, mp_open))
