@@ -768,47 +768,95 @@ data_csm %>% group_by(party) %>%
 # CSM over years (based on pri2 for 19-21 congress)
 #---------------------------------------------
 
-year <- c(2004, 2008, 2012, 2016, 2020, 2024)
-congress <- c(17, 18, 19, 20, 21, 22)
-ppp_close <- c(184, 245, 182, 110, 142, 164)
-ppp_open <- c(28, 0, 48, 141, 93, 85)
-ppp <- as.data.frame(cbind(year, congress, ppp_close, ppp_open)) %>%
-  mutate(party = "ppp") %>% mutate(close = ppp_close,
-                                   open = ppp_open) %>% select(-c(ppp_close, ppp_open))
+# number of total district seats
+# 17th 243, 18th 245, 19th 246, 20th 253, 21th 253, 22th 254
 
-mp_close <- c(160, 202, 130, 181, 144, 147)
-mp_open <- c(83, 0, 89, 57, 109, 97)
-mp <- as.data.frame(cbind(year, congress, mp_close, mp_open)) %>%
-  mutate(party = "mp") %>% mutate(close = mp_close,
-                                  open = mp_open) %>% select(-c(mp_close, mp_open))
+csm <- data %>% group_by(congress, party) %>% summarize(open = sum(pri1 == 1, na.rm=T),
+                                                 close = sum(pri1 == 0, na.rm=T),
+                                                 non = sum(is.na(pri1)==T)) %>% ungroup(.)
 
-csm <- rbind(ppp, mp) %>% mutate(pct.open = open/(open+close)*100,
-                                 pct.close = close/(open+close)*100) 
+csm2 <- rbind(
+c(17, "ppp", 28, 184, 31),
+c(18, "ppp", 0, 245, 0),
+c(22, "ppp", 85, 164, 5),
+c(17, "mp", 83, 160, 0),
+c(18, "mp", 0, 202, 43),
+c(22, "mp", 97, 147, 10)) %>% `colnames<-`(c("congress", "party", "open", "close", "non")) %>% data.frame(.)
 
-all <- csm %>% group_by(year, congress) %>% summarize(close = sum(close), open = sum(open)) %>%
-  mutate(pct.open = open/(open+close)*100,
-         pct.close = close/(open+close)*100,
-         party = "average") 
+csm_all <- rbind(csm, csm2) %>% arrange(party, congress) %>%
+  mutate_at(c("congress", "open", "close", "non"), .funs = as.numeric) %>%
+  mutate(year = as.factor(c(seq(2004, 2024, 4), seq(2004, 2024, 4))),
+         pct.open = open/(open+close+non)*100,
+         pct.close = close/(open+close+non)*100)
 
-csm <- rbind(csm, all) 
-csm$year <- as.factor(csm$year)
+csm <- csm_all %>% group_by(congress) %>% 
+  summarize(open = sum(open),
+            close = sum(close),
+            non = sum(non)) %>% 
+  mutate(pct.open = open/(open+close+non)*100,
+         pct.close = close/(open+close+non)*100,
+         pct.non = non/(open+close+non)*100,
+         year = as.factor(seq(2004, 2024, 4))) 
 
-csm %>% filter(year != "2008") %>%
-  ggplot(., aes(year, pct.open, group = as.factor(party))) +
-  geom_line(linetype = "dotted", aes(color = as.factor(party))) + 
-  geom_point(aes(color = as.factor(party))) +
-  scale_color_manual(name = "Party",
-                     labels = c("Average", "MP", "PPP"),
-                     values=c("darkgrey","cadetblue", "violetred")) +
-  xlab("Election Year") + 
-  ylab("% of Primaries") +
-  theme(legend.position = "bottom",
-        plot.caption = element_text(hjust = 0, face= "italic"),
-        plot.title.position = "plot",
-        plot.caption.position = "plot")
+csm_long <- csm %>% select(year, pct.open, pct.close, pct.non) %>%
+  pivot_longer(cols = starts_with("pct"), names_to = "type", values_to = "percentage")
 
-ggsave("primary_years.png", plot = last_plot(),
-       width = 6, height = 4)
+csm_long$type <- factor(csm_long$type, levels = c("pct.open", "pct.close", "pct.non"))
+
+library(RColorBrewer)
+
+ggplot(csm_long, aes(x = as.factor(year), y = percentage, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Election Year", y = "Percentage") +
+  theme(legend.position = "bottom", legend.title = element_blank()) +
+  scale_fill_manual(labels = c("Primary", "Party Nomination", "None"),
+                    values = c("coral", "cadetblue", "grey")) 
+
+ggsave("primary_years2.png", plot = last_plot(),
+        width = 6, height = 4)
+   
+# ctrl+shift+c
+# year <- c(2004, 2008, 2012, 2016, 2020, 2024)
+# congress <- c(17, 18, 19, 20, 21, 22)
+# ppp_close <- c(184, 245, 182, 110, 142, 164)
+# ppp_open <- c(28, 0, 48, 141, 93, 85)
+# ppp <- as.data.frame(cbind(year, congress, ppp_close, ppp_open)) %>%
+#   mutate(party = "ppp") %>% mutate(close = ppp_close,
+#                                    open = ppp_open) %>% select(-c(ppp_close, ppp_open))
+# 
+# mp_close <- c(160, 202, 130, 181, 144, 147)
+# mp_open <- c(83, 0, 89, 57, 109, 97)
+# mp <- as.data.frame(cbind(year, congress, mp_close, mp_open)) %>%
+#   mutate(party = "mp") %>% mutate(close = mp_close,
+#                                   open = mp_open) %>% select(-c(mp_close, mp_open))
+# 
+# csm <- rbind(ppp, mp) %>% mutate(pct.open = open/(open+close)*100,
+#                                  pct.close = close/(open+close)*100) 
+# 
+# all <- csm %>% group_by(year, congress) %>% summarize(close = sum(close), open = sum(open)) %>%
+#   mutate(pct.open = open/(open+close)*100,
+#          pct.close = close/(open+close)*100,
+#          party = "average") 
+# 
+# csm <- rbind(csm, all) 
+# csm$year <- as.factor(csm$year)
+# 
+# csm %>% filter(year != "2008") %>%
+#   ggplot(., aes(year, pct.open, group = as.factor(party))) +
+#   geom_line(linetype = "dotted", aes(color = as.factor(party))) + 
+#   geom_point(aes(color = as.factor(party))) +
+#   scale_color_manual(name = "Party",
+#                      labels = c("Average", "MP", "PPP"),
+#                      values=c("darkgrey","cadetblue", "violetred")) +
+#   xlab("Election Year") + 
+#   ylab("% of Primaries") +
+#   theme(legend.position = "bottom",
+#         plot.caption = element_text(hjust = 0, face= "italic"),
+#         plot.title.position = "plot",
+#         plot.caption.position = "plot")
+# 
+# ggsave("primary_years.png", plot = last_plot(),
+#        width = 6, height = 4)
 #---------------------------------------------
 
 
