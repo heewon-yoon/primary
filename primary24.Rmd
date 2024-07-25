@@ -803,8 +803,6 @@ csm_long <- csm %>% select(year, pct.open, pct.close, pct.non) %>%
 
 csm_long$type <- factor(csm_long$type, levels = c("pct.open", "pct.close", "pct.non"))
 
-library(RColorBrewer)
-
 ggplot(csm_long, aes(x = as.factor(year), y = percentage, fill = type)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(x = "Election Year", y = "Percentage") +
@@ -859,6 +857,129 @@ ggsave("primary_years2.png", plot = last_plot(),
 #        width = 6, height = 4)
 #---------------------------------------------
 
+
+#---------------------------------------------
+# Map
+#---------------------------------------------
+# match to 19 district boundaries
+match <- read_excel("/Users/hyoon/Desktop/Yoon2/primary/mygeodata/sf_match19-22.xlsx") %>% 
+  mutate(province_dat = case_when(
+    province == "강원도" ~ "gw",
+    province == "경기도" ~ "gg",
+    province == "경상남도" ~ "gn",
+    province == "경상북도" ~ "gb",
+    province == "광주광역시" ~ "gj",
+    province == "대구광역시" ~ "dg",
+    province == "대전광역시" ~ "dj",
+    province == "부산광역시" ~ "bs",
+    province == "서울특별시" ~ "sl",
+    province == "세종특별자치시" ~ "sj",
+    province == "울산광역시" ~ "us",
+    province == "인천광역시" ~ "ic",
+    province == "전라남도" ~ "jn",
+    province == "전라북도" ~ "jb",
+    province == "제주특별자치도" ~ "jj",
+    province == "충청남도" ~ "cn",
+    province == "충청북도" ~ "cb",
+    TRUE ~ province
+  ))
+
+mp22 <- read_excel("/Users/hyoon/Desktop/Yoon2/primary/election data/CSM/22csm_mp.xlsx") %>% 
+  `colnames<-`(c("province", "district", "party", "candidate", "csm", "background")) %>%
+  mutate(primary = case_when(
+    csm %in% c("경선", "전략경선") ~ 1,
+    csm %in% c("단수공천", "전략공천") ~ 0,
+    TRUE ~ NA),
+    province = case_when(
+      province == "강원도" ~ "강원특별자치도",
+      province == "제주도" ~ "제주특별자치도",
+      TRUE ~ province),
+    congress = 22,
+    party = "mp")
+pp22 <- read_excel("/Users/hyoon/Desktop/Yoon2/primary/election data/CSM/22csm_pp.xlsx") %>% 
+  `colnames<-`(c("province", "district", "party", "candidate", "csm", "background")) %>%
+  mutate(primary = case_when(
+    csm %in% c("경선") ~ 1,
+    csm %in% c("단수공천", "국민추천제", "전략공천") ~ 0,
+    TRUE ~ NA),
+    congress = 22,
+    party = "ppp")
+
+match22mp <- left_join(match,
+                       mp22 %>% select(province, district, party, primary),
+                       by = c("province22" = "province",
+                              "district22" = "district")) %>%
+  filter(!(is.na(province))) %>% mutate(party = "mp",
+                                        congress = 22)
+
+match22pp <- left_join(match,
+                       pp22 %>% select(province, district, party, primary),
+                       by = c("province22" = "province",
+                              "district22" = "district")) %>%
+  filter(!(is.na(province))) %>% mutate(party = "ppp",
+                                        congress = 22)
+
+match22 <- rbind(match22mp, match22pp) %>% rename("pri2" = "primary")
+
+
+match21mp <- left_join(match,
+                     data %>% filter(congress == 21 & party == "mp") %>% select(congress, province, district, party, pri2),
+                       by = c("province_dat" = "province",
+                              "district21" = "district")) %>% filter(!(is.na(province))) %>% mutate(party = "mp",
+                                                                                                    congress = 21)
+
+match21pp <- left_join(match,
+                     data %>% filter(congress == 21 & party == "ppp") %>% select(congress, province, district, party, pri2),
+                       by = c("province_dat" = "province",
+                              "district21" = "district")) %>% filter(!(is.na(province))) %>% mutate(party = "ppp",
+                                                                                                    congress = 21)
+
+match20mp <- left_join(match,
+                     data %>% filter(congress == 20 & party == "mp") %>% select(congress, province, district, party, pri2),
+                       by = c("province_dat" = "province",
+                              "district20" = "district")) %>% filter(!(is.na(province))) %>% mutate(party = "mp",
+                                                                                                    congress = 20)
+
+match20pp <- left_join(match,
+                     data %>% filter(congress == 20 & party == "ppp") %>% select(congress, province, district, party, pri2),
+                       by = c("province_dat" = "province",
+                              "district20" = "district")) %>% filter(!(is.na(province))) %>% mutate(party = "ppp",
+                                                                                                    congress = 20)
+
+match19 <- left_join(match,
+                       data %>% filter(congress == 19) %>% select(congress, province, district, party, pri2),
+                       by = c("province_dat" = "province",
+                              "precinct_n" = "district")) %>% filter(!(is.na(province))) %>%
+  mutate(congress = 19)
+
+csm_match <- rbind(match19, match20pp, match20mp, match21pp, match21mp, match22)
+
+# mapping
+library(sf)
+map <- left_join(csm_match, sf::read_sf("assembly-precinct-19-geo-polygon.shp"),
+                 by = c("province", "precinct_n")) %>% 
+  mutate(pri2 = as.factor(pri2),
+         party = case_when(party == "mp" ~ "MP",
+                           party == "ppp" ~ "PPP"),
+         year = case_when(congress == 19 ~ "2012",
+                          congress == 20 ~ "2016",
+                          congress == 21 ~ "2020",
+                          congress == 22 ~ "2024")) 
+
+ggplot(map) + geom_sf(aes(fill = pri2, geometry = geometry)) + 
+  scale_fill_manual(name = "Nomination Method",
+                     labels = c("Centralized", "Primary"),
+                     values = c("steelblue3", "darkgoldenrod2")) + 
+    theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "bottom") +
+  facet_grid(rows = vars(party),
+             cols = vars(year))
+
+ggsave("csm_map2.png", plot = last_plot(),
+       width = 6, height = 4)
 
 #---------------------------------------------
 # Margin of victory
