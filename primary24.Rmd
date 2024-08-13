@@ -801,14 +801,15 @@ csm <- csm_all %>% group_by(congress) %>%
 csm_long <- csm %>% select(year, pct.open, pct.close, pct.non) %>%
   pivot_longer(cols = starts_with("pct"), names_to = "type", values_to = "percentage")
 
-csm_long$type <- factor(csm_long$type, levels = c("pct.open", "pct.close", "pct.non"))
+csm_long$type <- factor(csm_long$type, levels = c("pct.close", "pct.open", "pct.non"))
 
 ggplot(csm_long, aes(x = as.factor(year), y = percentage, fill = type)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(x = "Election Year", y = "Percentage") +
-  theme(legend.position = "bottom", legend.title = element_blank()) +
-  scale_fill_manual(labels = c("Primary", "Party Nomination", "None"),
-                    values = c("coral", "cadetblue", "grey")) 
+  theme(legend.position = "bottom") +
+  scale_fill_manual(name = "Nomination Method",
+                    labels = c("Centralized", "Primary", "None"),
+                    values = c("darkgoldenrod2", "aquamarine4", "grey")) 
 
 ggsave("primary_years2.png", plot = last_plot(),
         width = 6, height = 4)
@@ -966,20 +967,21 @@ map <- left_join(csm_match, sf::read_sf("assembly-precinct-19-geo-polygon.shp"),
                           congress == 21 ~ "2020",
                           congress == 22 ~ "2024")) 
 
-ggplot(map) + geom_sf(aes(fill = pri2, geometry = geometry)) + 
+ggplot(map) + geom_sf(aes(fill = pri2, geometry = geometry), linewidth = 0.03) + 
   scale_fill_manual(name = "Nomination Method",
                      labels = c("Centralized", "Primary"),
-                     values = c("steelblue3", "darkgoldenrod2")) + 
+                     values = c("aquamarine4", "darkgoldenrod2")) + 
     theme(axis.text.x = element_blank(),
         axis.text.y = element_blank(),
         axis.ticks = element_blank(),
         panel.background = element_blank(),
-        legend.position = "bottom") +
+        legend.position = "bottom",
+        plot.margin=grid::unit(c(0,0,0,0), "mm")) +
   facet_grid(rows = vars(party),
              cols = vars(year))
 
 ggsave("csm_map2.png", plot = last_plot(),
-       width = 6, height = 4)
+       width = 6, height = 3)
 
 #---------------------------------------------
 # Margin of victory
@@ -1139,6 +1141,158 @@ feols(pri2 ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, da
 feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data)
 
 #---------------------------------------------
+
+
+#---------------------------------------------
+# Analysis: effect of ruling party
+#---------------------------------------------
+feols(pri2 ~ ruling | district + congress + party, data)
+
+# compare number of applicants for ruling party v. non-ruling party (n.app)
+# what's the avg number of applicants?
+data %>% select(congress, district, party, ruling, n.app, ruling) %>% 
+  group_by(ruling, congress) %>% summarize(tot = sum(n.app, na.rm=T), # total number of applicants 
+                                           miss = sum(is.na(n.app)), # missing obs
+                                           num = n(), # total number of obs
+                                           avg = tot/(num-miss)) # avg for exisitng data entries
+
+# ruling parties hold primaries more often (maybe because of expected spoils)
+# but less likely to use primaries in safe districts (maybe because they have other resources to give in exchange)
+
+# interaction with controls
+
+feols(pri2 ~ vs_1_p*ruling + prior.pri2 + inc | district + congress + party, data)
+# negative but not significant
+feols(pri2 ~ mar_cont2*ruling + prior.pri2 + inc | district + congress + party, data)
+# iv: 1.08; pred prob for non-ruling 1.08
+# ruling: 0.09
+# interaction: -1.06; pred prob for ruling 1.08-1.06=0.02
+#---------------------------------------------
+
+
+#---------------------------------------------
+## Plot Interaction Effects
+#---------------------------------------------
+
+library(gridExtra)
+
+
+## Voteshare
+
+im1 <- feols(pri2 ~ vs_1_p*ruling | district + congress + party, data)
+# negative interaction but not significant
+data_im1 <- data %>%
+  expand.grid(vs_1_p = seq(min(data$vs_1_p, na.rm=T), max(data$vs_1_p, na.rm=T), length.out = 100),
+              ruling = unique(data$ruling),
+              district = unique(data$district)[1],  # Fix one district (or average effects)
+              congress = unique(data$congress)[1],  # Fix one congress
+              party = unique(data$party)[1])        # Fix one party
+data_im1$predicted_pri2 <- predict(im1, newdata = data_im1)
+
+plot1 <- ggplot(data_im1, aes(x = vs_1_p, y = predicted_pri2, color = factor(ruling))) +
+  geom_line() +
+  labs(x = "Vote Share (previous election)",
+       y = "Probability of Primaries",
+       color = "Ruling") +
+  scale_color_manual(name = "",
+                     labels = c("Non-ruling Party", "Ruling Party"),
+                     values=c("purple4", "royalblue2")) +
+  theme(legend.position = "none")
+
+## Avg Voteshare
+
+im2 <- feols(pri2 ~ avg_vs4_p*ruling | district + congress + party, data)
+# negative interaction but not significant
+data_im2 <- data %>%
+  expand.grid(avg_vs4_p = seq(min(data$avg_vs4_p, na.rm=T), max(data$avg_vs4_p, na.rm=T), length.out = 100),
+              ruling = unique(data$ruling),
+              district = unique(data$district)[1],  # Fix one district (or average effects)
+              congress = unique(data$congress)[1],  # Fix one congress
+              party = unique(data$party)[1])        # Fix one party
+data_im2$predicted_pri2 <- predict(im2, newdata = data_im2)
+
+plot2 <- ggplot(data_im2, aes(x = avg_vs4_p, y = predicted_pri2, color = factor(ruling))) +
+  geom_line() +
+  labs(x = "Vote Share (previous 4 avg)",
+       y = "Probability of Primaries",
+       color = "Ruling") +
+  scale_color_manual(name = "",
+                     labels = c("Non-ruling Party", "Ruling Party"),
+                     values=c("purple4", "royalblue2")) +
+  theme(legend.position = "none")
+
+## MoV
+
+im3 <- feols(pri2 ~ mar_cont2*ruling | district + congress + party, data)
+# iv: 0.72; (value when ruling=0) predicted prob of primary when non ruling party 0.72
+# ruling: 0.12 (value when iv=0) predicted prob of primary in close district 0.12
+# interaction: -0.88; (difference in slope b/w ruling v. non-ruling) predicted prob when ruling 0.72-0.88 = -0.16 
+
+data_im3 <- data %>%
+  expand.grid(mar_cont2 = seq(min(data$mar_cont2), max(data$mar_cont2), length.out = 100),
+              ruling = unique(data$ruling),
+              district = unique(data$district)[1],  # Fix one district (or average effects)
+              congress = unique(data$congress)[1],  # Fix one congress
+              party = unique(data$party)[1])        # Fix one party
+data_im3$predicted_pri2 <- predict(im3, newdata = data_im3)
+
+plot3 <- ggplot(data_im3, aes(x = mar_cont2, y = predicted_pri2, color = factor(ruling))) +
+  geom_line() +
+  labs(x = "Margin of Victory",
+       y = "Probability of Primaries",
+       color = "Ruling") +
+  scale_color_manual(name = "",
+                     labels = c("Non-ruling Party", "Ruling Party"),
+                     values=c("purple4", "royalblue2")) +
+  theme(legend.position = "none")
+
+## Win 4
+
+im4 <- feols(pri2 ~ win4*ruling | district + congress + party, data)
+# iv: 0.25; pred prob for non-ruling 0.25
+# ruling: 0.13
+# interaction: -0.17; pred prob for ruling 0.25-0.17=0.08
+
+data_im4 <- data %>%
+  expand.grid(win4 = seq(min(data$win4, na.rm=T), max(data$win4, na.rm=T), length.out = 100),
+              ruling = unique(data$ruling),
+              district = unique(data$district)[1],  # Fix one district (or average effects)
+              congress = unique(data$congress)[1],  # Fix one congress
+              party = unique(data$party)[1])        # Fix one party
+data_im4$predicted_pri2 <- predict(im4, newdata = data_im4)
+
+plot4 <- ggplot(data_im4, aes(x = win4, y = predicted_pri2, color = factor(ruling))) +
+  geom_line() +
+  labs(x = "Share of Wins",
+       y = "Probability of Primaries",
+       color = "Ruling") +
+  scale_color_manual(name = "",
+                     labels = c("Non-ruling Party", "Ruling Party"),
+                     values=c("purple4", "royalblue2")) +
+  theme(legend.position = "none")
+
+## in grids
+
+library(gtable)
+get_legend <- function(myggplot) {
+  tmp <- ggplotGrob(myggplot)
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+shared_legend <- get_legend(plot1)
+
+int <- grid.arrange(
+  arrangeGrob(plot1, plot2, plot3, plot4, ncol = 2), # Combine the plots
+  shared_legend,                                    # Add the shared legend
+  nrow = 2,
+  heights = c(10, 1)                                # Adjust heights: more space for plots
+)
+
+ggsave("interaction.png", plot = int,
+       width = 6, height = 4.5)
+#---------------------------------------------
+
 
 
 #---------------------------------------------
@@ -1357,8 +1511,10 @@ ggsave("log.png", plot = last_plot(),
 
 
 #---------------------------------------------
-# regression table
+# regression table 
 #---------------------------------------------
+
+# safeness ~ primary
 
 a <- feols(pri2 ~ vs_1_p | district + congress + party, data)
 b <- feols(pri2 ~ avg_vs4_p | district + congress + party, data)
@@ -1378,6 +1534,39 @@ etable(a, b, h, d, e, i,
               prior.pri2 = "Prior Primary", inc = "Incumbency",
               ruling = "Ruling Party", 
               pri2 = "Primary"))
+
+# interaction
+
+lat1 <- etable(im1,
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(vs_1_p = "Previous Voteshare", ruling = "Ruling",
+              pri2 = "Primary"))
+
+lat2 <- etable(im2,
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(avg_vs4_p = "Avg Voteshare", ruling = "Ruling",
+              pri2 = "Primary"))
+
+lat3 <- etable(im3,
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(mar_cont2 = "Winning Margin", ruling = "Ruling",
+              pri2 = "Primary"))
+
+lat4 <- etable(im4,
+       tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
+       digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
+       dict=c(win4 = "Share of Wins", ruling = "Ruling",
+              pri2 = "Primary"))
+
+writeLines(lat1, "table1.tex")
+writeLines(lat2, "table2.tex")
+writeLines(lat3, "table3.tex")
+writeLines(lat4, "table4.tex")
+
+# safeness ~ applicants
 
 g <- feols(n.app ~ vs_1_p | district + congress + party, data)
 h <- feols(n.app ~ avg_vs4_p | district + congress + party, data)
