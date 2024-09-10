@@ -718,6 +718,7 @@ data <- data.frame(rbind(data19, data20, data21)) %>% mutate_all(function(x) ife
 ```
 
 
+
 ## Analysis
 ```{r}
 ################
@@ -1191,6 +1192,7 @@ data_im1$predicted_pri2 <- predict(im1, newdata = data_im1)
 
 plot1 <- ggplot(data_im1, aes(x = vs_1_p, y = predicted_pri2, color = factor(ruling))) +
   geom_line() +
+    ylim(0,0.6) + xlim(0,0.8) +
   labs(x = "Vote Share (previous election)",
        y = "Probability of Primaries",
        color = "Ruling") +
@@ -1213,8 +1215,9 @@ data_im2$predicted_pri2 <- predict(im2, newdata = data_im2)
 
 plot2 <- ggplot(data_im2, aes(x = avg_vs4_p, y = predicted_pri2, color = factor(ruling))) +
   geom_line() +
+    ylim(0,0.6) + xlim(0,0.8) +
   labs(x = "Vote Share (previous 4 avg)",
-       y = "Probability of Primaries",
+       y = "",
        color = "Ruling") +
   scale_color_manual(name = "",
                      labels = c("Non-ruling Party", "Ruling Party"),
@@ -1238,6 +1241,7 @@ data_im3$predicted_pri2 <- predict(im3, newdata = data_im3)
 
 plot3 <- ggplot(data_im3, aes(x = mar_cont2, y = predicted_pri2, color = factor(ruling))) +
   geom_line() +
+    ylim(0,0.6) + xlim(0,0.8) +
   labs(x = "Margin of Victory",
        y = "Probability of Primaries",
        color = "Ruling") +
@@ -1263,8 +1267,9 @@ data_im4$predicted_pri2 <- predict(im4, newdata = data_im4)
 
 plot4 <- ggplot(data_im4, aes(x = win4, y = predicted_pri2, color = factor(ruling))) +
   geom_line() +
+  ylim(0,0.6) + xlim(0,0.8) +
   labs(x = "Share of Wins",
-       y = "Probability of Primaries",
+       y = "",
        color = "Ruling") +
   scale_color_manual(name = "",
                      labels = c("Non-ruling Party", "Ruling Party"),
