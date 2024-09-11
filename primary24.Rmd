@@ -258,22 +258,19 @@ setwd("/Users/hyoon/Desktop/Yoon2/primary/election data/CSM")
 
 mp <- read_xlsx("elec_mp.xlsx") %>% 
   rename(congress = elec) %>% arrange(congress, province, district) %>%
-  mutate(n.app = ifelse(is.na(n.app)==T & congress != 21, 0, n.app),
-         inc = ifelse(is.na(inc)==T& congress != 21, 0, inc),
-         for.inc = ifelse(is.na(for.inc)==T & congress != 21, 0, for.inc),
-         cong.exp = ifelse(inc == 1 | for.inc == 1, 1, 0),
-         cong.exp = ifelse(congress == 21, NA, cong.exp)) %>% 
+  mutate(n.app = ifelse(is.na(n.app)==T & congress %in% c(19,20), 0, n.app),
+         inc = ifelse(is.na(inc)==T& congress %in% c(19,20), 0, inc)) %>% 
   mutate(pri1 = case_when(
     csm %in% c("/단일화경선", "경선", "경선?", "경선(결선)",
                "경선/단일화경선", "경선공천", "단수후보/단일화경선",
-               "단일화경선", "야권단일화경선", "전략공천/단일화경선") ~ "1",
+               "단일화경선", "야권단일화경선", "전략경선", "전략공천/단일화경선") ~ "1",
     csm %in% c("공천", "단수공천", "단수추천", "단수후보", 
                "야권연대", "원외단수", "전략검토지역", "전략공천", 
                "전략선거구", "현역단수") ~ "0", 
     TRUE ~ csm),
-    pri2 = case_when(
+    pri2 = case_when( # 단일화는 비경선
       csm %in% c("경선", "경선?", "경선(결선)",
-                 "경선/단일화경선", "경선공천") ~ "1",
+                 "경선/단일화경선", "경선공천", "전략경선") ~ "1",
       csm %in% c("/단일화경선", "공천", "단수공천", "단수추천",
                  "단수후보", "단수후보/단일화경선", "단일화경선", 
                  "야권단일화경선", "야권연대", "원외단수", "전략검토지역",
@@ -285,8 +282,10 @@ mp <- read_xlsx("elec_mp.xlsx") %>%
   mutate(party_kor = case_when(
     congress == 19 ~ "민주통합당",
     congress == 20 ~ "더불어민주당",
-    congress == 21 ~ "더불어민주당")) %>%
+    congress == 21 ~ "더불어민주당",
+    congress == 22 ~ "더불어민주당")) %>%
   add_column(party = "mp",
+             party_k22 = "더불어민주당",
              party_k21 = "더불어민주당",
              party_k20 = "더불어민주당",
              party_k19 = "민주통합당",
@@ -297,10 +296,8 @@ mp <- read_xlsx("elec_mp.xlsx") %>%
 
 ppp <- read_xlsx("elec_ppp.xlsx") %>% 
   rename(congress = elec) %>% arrange(congress, province, district) %>%
-  mutate(n.app = ifelse(is.na(n.app)==T, 0, n.app),
-         inc = ifelse(is.na(inc)==T, 0, inc),
-         for.inc = ifelse(is.na(for.inc)==T, 0, for.inc),
-         cong.exp = ifelse(inc == 1 | for.inc == 1, 1, 0)) %>% 
+  mutate(n.app = ifelse(is.na(n.app)==T & congress %in% c(19,20), 0, n.app),
+         inc = ifelse(is.na(inc)==T & congress %in% c(19,20), 0, inc)) %>% 
   mutate(pri1 = case_when(
     csm %in% c("경선", "경선(국민참여)", "경선(단독후보)", "경선(여론조사)",
                                   "경선공천", "경선단독후보") ~ "1",
@@ -320,8 +317,10 @@ ppp <- read_xlsx("elec_ppp.xlsx") %>%
   mutate(party_kor = case_when(
     congress == 19 ~ "새누리당",
     congress == 20 ~ "새누리당",
-    congress == 21 ~ "미래통합당")) %>%
+    congress == 21 ~ "미래통합당",
+    congress == 22 ~ "국민의힘")) %>%
   add_column(party = "ppp",
+             party_k22 = "국민의힘",
              party_k21 = "미래통합당",
              party_k20 = "새누리당",
              party_k19 = "새누리당",
@@ -400,9 +399,118 @@ elect <- read.csv("elec.csv") %>% select(-X) %>%
 
 ## MERGE
 
+dat <- rbind(ppp, mp) 
+
+# 22 congress
+
+dat22 <- left_join(dat %>% filter(congress == 22),
+                   mapping %>% select(-"province_kor"), 
+                   by = c("province" = "province",
+                          "district" = "district22")) %>%
+  # voteshare (21)
+  left_join(., smd_vs %>% filter(congress == 21) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k21" = "party",
+                   "district21" = "district")) %>%
+  # voteshare (20)
+  left_join(., smd_vs %>% filter(congress == 20) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k20" = "party",
+                   "district20" = "district")) %>%
+  # voteshare (19)
+  left_join(., smd_vs %>% filter(congress == 19) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k19" = "party",
+                   "district19" = "district")) %>%
+  # voteshare (18)
+  left_join(., smd_vs %>% filter(congress == 18) %>% select(-c("cand", "congress")),
+            by = c("province" = "province",
+                   "party_k18" = "party",
+                   "district18" = "district")) %>%
+  # winparty (21)
+  left_join(., elect %>% filter(congress == 21) %>% select(province, district, elec_party, w_margin),
+            by = c("province" = "province",
+                   "district21" = "district")) %>%
+  # winparty (20)
+  left_join(., elect %>% filter(congress == 20) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district20" = "district")) %>%
+  # winparty (19)
+  left_join(., elect %>% filter(congress == 19) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district19" = "district")) %>%
+  # winparty (18)
+  left_join(., elect %>% filter(congress == 18) %>% select(province, district, elec_party),
+            by = c("province" = "province",
+                   "district18" = "district")) %>%
+  # nominee, voteshare (22)
+  #left_join(., smd_vs %>% filter(congress == 22) %>% select(-congress),
+  #          by = c("province" = "province",
+  #                 "party_kor" = "party",
+  #                 "district" = "district")) %>% select(-nominee) %>% rename(nominee = cand) %>%
+  # # incumbent race
+  # mutate(inc_race = ifelse(cand1 == elec_name | cand2 == elec_name | cand3 == elec_name |
+  #                            cand4 == elec_name | cand5 == elec_name | nominee == elec_name, 1, 0)) %>%
+  # mutate(inc_race = ifelse(is.na(cand1) == T & is.na(cand2) == T & is.na(cand3) == T &
+  #                            is.na(cand4) == T & is.na(cand5) == T, inc_race, 0)) %>%
+  # prior primary
+  left_join(., dat %>% filter(congress == 21) %>% select(province, party_kor, district, pri1, pri2),
+            by = c("province" = "province",
+                   "party_k21" = "party_kor",
+                   "district21" = "district")) %>%
+  # rename
+  rename(vs_1 = vs.x,
+         vs_2 = vs.y,
+         vs_3 = vs.x.x,
+         vs_4 = vs.y.y,
+         party_1 = elec_party.x,
+         party_2 = elec_party.y,
+         party_3 = elec_party.x.x,
+         party_4 = elec_party.y.y,
+         pri1 = pri1.x,
+         pri2 = pri2.x,
+         prior.pri1 = pri1.y,
+         prior.pri2 = pri2.y) %>%
+  # winning margin
+  mutate(w_margin_1 = ifelse(party_1 == party_k21, w_margin, NA)) %>%
+  # average voteshare
+  rowwise() %>%
+  mutate(na4 = sum(is.na(district20) == F, is.na(district20) == F, is.na(district19) == F, is.na(district18) == F),
+         na3 = sum(is.na(district20) == F, is.na(district20) == F, is.na(district19) == F),
+         na2 = sum(is.na(district20) == F, is.na(district20) == F)) %>%
+  mutate(avg_vs4 = sum(vs_1, vs_2, vs_3, vs_4, na.rm=T)/na4,
+         avg_vs3 = sum(vs_1, vs_2, vs_3, na.rm=T)/na3,
+         avg_vs2 = sum(vs_1, vs_2, na.rm=T)/na2) %>%
+  # clean
+  select(congress, province, district, party, n.app, pri1, pri2,
+         inc, for.inc, 
+         prior.pri1, prior.pri2,
+         vs_1, w_margin_1, avg_vs4, avg_vs3, avg_vs2,
+         party_1, party_2, party_3, party_4, na4, na3, na2) %>%
+  mutate(vs = NA)
+
+dat22p <- dat22 %>% filter(party == "ppp") %>% 
+  mutate(party_1 = ifelse(party_1 == "미래통합당", 1, 0), 
+         party_2 = ifelse(party_2 == "새누리당", 1, 0),
+         party_3 = ifelse(party_3 == "새누리당", 1, 0),
+         party_4 = ifelse(party_4 == "한나라당", 1, 0),
+         win4 = sum(party_1, party_2, party_3, party_4, na.rm=T)/na4,
+         win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
+         win2 = sum(party_1, party_2, na.rm=T)/na2)
+dat22m <- dat22 %>% filter(party == "mp") %>%
+  mutate(party_1 = ifelse(party_1 == "더불어민주당", 1, 0), 
+         party_2 = ifelse(party_2 == "더불어민주당", 1, 0),
+         party_3 = ifelse(party_3 == "민주통합당", 1, 0),
+         party_4 = ifelse(party_4 == "통합민주당", 1, 0),
+         win4 = sum(party_1, party_2, party_3, party_4, na.rm=T)/na4,
+         win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
+         win2 = sum(party_1, party_2, na.rm=T)/na2)
+
+data22 <- rbind(dat22p, dat22m) %>% select(-c(party_1, party_2, party_3, party_4, na4, na3, na2))
+  
+
 # 21 congress
 
-dat <- rbind(ppp, mp)
 dat21 <- left_join(dat %>% filter(congress == 21),
                    mapping %>% select(-"province_kor"), 
                    by = c("province" = "province",
@@ -483,7 +591,7 @@ dat21 <- left_join(dat %>% filter(congress == 21),
          avg_vs2 = sum(vs_1, vs_2, na.rm=T)/na2) %>%
   # clean
   select(congress, province, district, party, n.app, pri1, pri2,
-         inc, for.inc, cong.exp,
+         inc, for.inc, 
          vs, prior.pri1, prior.pri2,
          vs_1, w_margin_1, avg_vs4, avg_vs3, avg_vs2,
          party_1, party_2, party_3, party_4, na4, na3, na2)
@@ -585,7 +693,7 @@ dat20 <- left_join(dat %>% filter(congress == 20),
          avg_vs2 = sum(vs_1, vs_2, na.rm=T)/na2) %>%
   # clean
   select(congress, province, district, party, n.app, pri1, pri2,
-         inc, for.inc, cong.exp,
+         inc, for.inc, 
          vs, prior.pri1, prior.pri2,
          vs_1, w_margin_1, avg_vs4, avg_vs3, avg_vs2,
          party_1, party_2, party_3, party_4, na4, na3, na2)
@@ -687,7 +795,7 @@ dat19 <- left_join(dat %>% filter(congress == 19),
          avg_vs2 = sum(vs_1, vs_2, na.rm=T)/na2) %>%
   # clean
   select(congress, province, district, party, n.app, pri1, pri2,
-         inc, for.inc, cong.exp,
+         inc, for.inc,
          vs, prior.pri1, prior.pri2,
          vs_1, w_margin_1, avg_vs4, avg_vs3, avg_vs2,
          party_1, party_2, party_3, party_4, na4, na3, na2)
@@ -711,10 +819,12 @@ dat19m <- dat19 %>% filter(party == "mp") %>%
 
 data19 <- rbind(dat19p, dat19m) %>% select(-c(party_1, party_2, party_3, party_4, na4, na3, na2))
 
-data <- data.frame(rbind(data19, data20, data21)) %>% mutate_all(function(x) ifelse(is.nan(x), NA, x))
+data <- data.frame(rbind(data19, data20, data21, data22)) %>% mutate_all(function(x) ifelse(is.nan(x), NA, x))
 
 #setwd("~/Desktop/Yoon/Korea Primary/election data")
-#write.csv(data, "clean_data.csv")
+#write.csv(data, "clean_data.csv") # without 22
+
+#write.csv(data, "clean_data2.csv") # with 22
 ```
 
 
@@ -725,17 +835,18 @@ data <- data.frame(rbind(data19, data20, data21)) %>% mutate_all(function(x) ife
 ## Analysis
 ################
 
-setwd("/Users/hyoon/Desktop/Yoon2/primary/election data")
-data <- read.csv("clean_data.csv") %>% mutate(
+setwd("/Users/hyoon/Desktop/Yoon2/primary/election data/")
+data <- read.csv("clean_data2.csv") %>% mutate(
   prior.pri1 = ifelse(congress == 19, 0, prior.pri1),
   prior.pri2 = ifelse(congress == 19, 0, prior.pri2)) %>%
   mutate(ruling = case_when(
     congress == 19 & party == "ppp" ~ 1, 
     congress == 20 & party == "ppp" ~ 1,
     congress == 21 & party == "mp" ~ 1,
+    congress == 22 & party == "ppp" ~ 1,
     TRUE ~ 0
   )) %>%
-  mutate_at(c("inc", "for.inc", "cong.exp"), .funs=as.numeric)
+  mutate_at(c("inc", "for.inc"), .funs=as.numeric)
 
 # for csm: pri2 seems to be more accurate? (esp for mp 19)
 # pri1 includes coalition cases pri2 doesn't
@@ -988,6 +1099,8 @@ ggsave("csm_map2.png", plot = last_plot(),
 # Margin of victory
 #---------------------------------------------
 
+# distribution of margin of victory
+
 # data <- data %>% mutate(
 #   w_margin = ifelse(is.na(vs_1)==F & is.na(w_margin_1)==T, 0, w_margin_1))
 
@@ -1013,39 +1126,12 @@ ggplot(data, aes(w_margin_1)) + geom_histogram(fill = "lightgrey", color = "dark
 ggsave("margin_victory.png", plot = last_plot(),
        width = 6, height = 4)
 
+# create variables
 
 data <- data %>% mutate(
-  mar23 = ifelse(w_margin_1 >= 23, 1, 0),
-  mar30 = ifelse(w_margin_1 >= 20, 1, 0),
-  mar20 = ifelse(w_margin_1 >= 26, 1, 0)) %>%
+  mar23 = ifelse(w_margin_1 >= 23, 1, 0)) %>%
   mutate(mar23p = ifelse(is.na(vs_1)==F & is.na(mar23)==T, 0, mar23)) %>%
-  mutate(mar23 = ifelse(is.na(mar23)==T, 0, mar23),
-         mar30 = ifelse(is.na(mar30)==T, 0, mar30),
-         mar20 = ifelse(is.na(mar20)==T, 0, mar20)) %>%
-  mutate(mar25p = case_when(
-          party == "ppp" & congress == 19 & w_margin_1 >= 31 ~ 1,
-          party == "ppp" & congress == 20 & w_margin_1 >= 25 ~ 1,
-          party == "ppp" & congress == 21 & w_margin_1 >= 23 ~ 1,
-          party == "mp" & congress == 19 & w_margin_1 >= 39 ~ 1,
-          party == "mp" & congress == 20 & w_margin_1 >= 20 ~ 1,
-          party == "mp" & congress == 21 & w_margin_1 >= 14 ~ 1,
-          TRUE ~ 0),
-         mar30p = case_when(
-           party == "ppp" & congress == 19 & w_margin_1 >= 30 ~ 1,
-           party == "ppp" & congress == 20 & w_margin_1 >= 21 ~ 1,
-           party == "ppp" & congress == 21 & w_margin_1 >= 21 ~ 1,
-           party == "mp" & congress == 19 & w_margin_1 >= 23 ~ 1,
-           party == "mp" & congress == 20 & w_margin_1 >= 17 ~ 1,
-           party == "mp" & congress == 21 & w_margin_1 >= 13 ~ 1,
-           TRUE ~ 0),
-         mar20p = case_when(
-           party == "ppp" & congress == 19 & w_margin_1 >= 34 ~ 1,
-           party == "ppp" & congress == 20 & w_margin_1 >= 30 ~ 1,
-           party == "ppp" & congress == 21 & w_margin_1 >= 26 ~ 1,
-           party == "mp" & congress == 19 & w_margin_1 >= 43 ~ 1,
-           party == "mp" & congress == 20 & w_margin_1 >= 22 ~ 1,
-           party == "mp" & congress == 21 & w_margin_1 >= 16 ~ 1,
-           TRUE ~ 0)) %>% 
+  mutate(mar23 = ifelse(is.na(mar23)==T, 0, mar23)) %>%
   mutate(vs_1_p = vs_1/100,
          avg_vs4_p = avg_vs4/100)
 
@@ -1060,7 +1146,7 @@ data <- data %>% mutate(mar_cont = ifelse(is.na(vs_1)==F & is.na(w_margin_1)==T,
 
 
 #---------------------------------------------
-# number of appplicants 
+# number of applicants 
 #---------------------------------------------
 
 safe <- prop.table(table(data$n.app[data$mar23==1]))
@@ -1068,7 +1154,7 @@ unsafe <- prop.table(table(data$n.app[data$mar23==0]))
 
 safe <- data.frame(safe) %>% mutate(safe = 1)
 unsafe <- data.frame(unsafe) %>% mutate(safe = 0)
-dist <- rbind(safe, unsafe)
+dist <- rbind(safe, unsafe) 
 
 ggplot(dist, aes(Var1, Freq, group = as.factor(safe))) + 
   geom_line(stat="identity", linetype = "dotted", aes(Var1, Freq, color = as.factor(safe))) + 
@@ -1077,11 +1163,10 @@ ggplot(dist, aes(Var1, Freq, group = as.factor(safe))) +
                      labels = c("Non-safe", "Safe"),
                      values = c("grey", "cadetblue")) +
   xlab("Number of Applicants") + ylab("Share of Districts") + 
-  theme(legend.position = "bottom") 
+  theme(legend.position = "bottom")
 
-ggsave("num_apps.png", plot = last_plot(),
+ggsave("num_apps2.png", plot = last_plot(),
        width = 6, height = 4)
-
 #---------------------------------------------
 
 
@@ -1093,15 +1178,16 @@ ggsave("num_apps.png", plot = last_plot(),
 data %>%
   select(pri2, n.app, vs_1_p, avg_vs4_p, mar_cont2, win4, inc, ruling) %>% 
   as.data.frame(.) %>% 
-  stargazer(., 
+  stargazer(.,  type = "latex",
             title = "Summary Statistics",
             header = F, float = T,
             summary.stat = c("min","median", "max", "mean", "sd", "n"),
             font.size = 'footnotesize', 
             covariate.labels = c("Primary", "Number of Applicants", "Vote Share (previous)", 
                        "Vote Share (previous 4 avg)", "Winning Margin",
-                       "Share of Wins", "Incumbency", "Ruling Party"))
-
+                       "Share of Wins", "Incumbency", "Ruling Party"),
+            digits = 2,
+            out = "summary_stats.tex")
 #---------------------------------------------
 
 
