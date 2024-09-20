@@ -506,8 +506,65 @@ dat22m <- dat22 %>% filter(party == "mp") %>%
          win3 = sum(party_1, party_2, party_3, na.rm=T)/na3,
          win2 = sum(party_1, party_2, na.rm=T)/na2)
 
-data22 <- rbind(dat22p, dat22m) %>% select(-c(party_1, party_2, party_3, party_4, na4, na3, na2))
+data22 <- rbind(dat22p, dat22m) %>% select(-c(party_1, party_2, party_3, party_4, na4, na3, na2)) 
+
+# add n.app, inc info
   
+mp22 <- read_excel("/Users/hyoon/Desktop/Yoon2/primary/election data/elec22_cand.xlsx", 
+                   col_names = c("province", "district", "cand"),
+                   sheet=1) %>%
+  mutate(province = case_when(province == "강원도" ~ "gw",
+                   province == "경기도" ~ "gg",
+                   province == "경상남도" ~ "gn",
+                   province == "경상북도" ~ "gb",
+                   province == "광주광역시" ~ "gg",
+                   province == "대구광역시" ~ "dg",
+                   province == "대전광역시" ~ "dj",
+                   province == "부산광역시" ~ "bs",
+                   province == "서울특별시" ~ "sl",
+                   province == "세종" ~ "sj",
+                   province == "울산광역시" ~ "us",
+                   province == "인천광역시" ~ "ic",
+                   province == "전라남도" ~ "jn",
+                   province == "전라북도" ~ "jb",
+                   province == "제주" ~ "jj",
+                   province == "충청남도" ~ "cn",
+                   province == "충청북도" ~ "cb")) %>% group_by(district) %>% slice(-1) %>%
+  mutate(inc = ifelse(str_detect(cand, "국회의원") & !str_detect(cand, "전 국회의원"), 1, 0))
+
+mp22.n <- mp22 %>% group_by(province, district) %>% summarize(n.app = n(),
+                                                              inc = ifelse(any(inc == 1), 1, 0),
+                                                              party = "mp") %>% ungroup()
+ 
+ppp22 <- read_excel("/Users/hyoon/Desktop/Yoon2/primary/election data/elec22_cand.xlsx", 
+                   col_names = c("province", "district", "cand"),
+                   sheet=2) %>%
+  mutate(province = case_when(province == "강원" ~ "gw",
+                   province == "경기" ~ "gg",
+                   province == "경남" ~ "gn",
+                   province == "경북" ~ "gb",
+                   province == "광주" ~ "gg",
+                   province == "대구" ~ "dg",
+                   province == "대전" ~ "dj",
+                   province == "부산" ~ "bs",
+                   province == "서울" ~ "sl",
+                   province == "세종" ~ "sj",
+                   province == "울산" ~ "us",
+                   province == "인천" ~ "ic",
+                   province == "전남" ~ "jn",
+                   province == "전북" ~ "jb",
+                   province == "제주" ~ "jj",
+                   province == "충남" ~ "cn",
+                   province == "충북" ~ "cb")) %>% group_by(district) %>% slice(-1) %>%
+  mutate(inc = ifelse(str_detect(cand, "국회의원") & !str_detect(cand, "전 국회의원"), 1, 0))
+
+ppp22.n <- ppp22 %>% group_by(province, district) %>% summarize(n.app = n(),
+                                                                inc = ifelse(any(inc == 1), 1, 0),
+                                                              party = "ppp") %>% ungroup()
+
+n22 <- rbind(mp22.n, ppp22.n) %>% mutate(district = gsub("·", "", .$district)) %>%
+     mutate(district = gsub(" ", "", .$district)) %>% mutate(congress = 22)
+
 
 # 21 congress
 
@@ -846,7 +903,15 @@ data <- read.csv("clean_data2.csv") %>% mutate(
     congress == 22 & party == "ppp" ~ 1,
     TRUE ~ 0
   )) %>%
-  mutate_at(c("inc", "for.inc"), .funs=as.numeric)
+  mutate(district = gsub("·", "", .$district)) %>%
+  mutate(district = gsub(" ", "", .$district)) %>%
+  mutate_at(c("inc", "for.inc"), .funs=as.numeric) %>% select(-X)
+
+data <- left_join(data, n22, by=c("congress", "province", "district", "party")) %>%
+  mutate(n.app = coalesce(n.app.x, n.app.y),
+         inc = coalesce(inc.x, inc.y)) %>%
+  select(-c("n.app.x", "n.app.y", "inc.x", "inc.y"))
+
 
 # for csm: pri2 seems to be more accurate? (esp for mp 19)
 # pri1 includes coalition cases pri2 doesn't
@@ -1133,7 +1198,9 @@ data <- data %>% mutate(
   mutate(mar23p = ifelse(is.na(vs_1)==F & is.na(mar23)==T, 0, mar23)) %>%
   mutate(mar23 = ifelse(is.na(mar23)==T, 0, mar23)) %>%
   mutate(vs_1_p = vs_1/100,
-         avg_vs4_p = avg_vs4/100)
+         avg_vs4_p = avg_vs4/100,
+         avg_vs3_p = avg_vs3/100,
+         avg_vs2_p = avg_vs2/100)
 
 # continuous variable
 data <- data %>% mutate(mar_cont = ifelse(is.na(vs_1)==F & is.na(w_margin_1)==T, 0, w_margin_1),
@@ -1176,7 +1243,7 @@ ggsave("num_apps2.png", plot = last_plot(),
 #---------------------------------------------
 
 data %>%
-  select(pri2, n.app, vs_1_p, avg_vs4_p, mar_cont2, win4, inc, ruling) %>% 
+  select(pri2, n.app, vs_1_p, avg_vs4_p, mar_cont, win4, inc, ruling) %>% 
   as.data.frame(.) %>% 
   stargazer(.,  type = "latex",
             title = "Summary Statistics",
@@ -1213,19 +1280,114 @@ data %>%
 # test_power
 #---------------------------------------------
 
-
 #---------------------------------------------
 # Analysis: effect of safeness on csm
 #---------------------------------------------
+
+# baseline
+
 feols(pri2 ~ vs_1_p | district + congress + party, data)
+feols(pri2 ~ avg_vs3_p | district + congress + party, data)
+feols(pri2 ~ avg_vs2_p | district + congress + party, data)
 feols(pri2 ~ avg_vs4_p | district + congress + party, data)
-feols(pri2 ~ mar23 | district + congress + party, data)
 feols(pri2 ~ win4 | district + congress + party, data)
+feols(pri2 ~ win3 | district + congress + party, data)
+feols(pri2 ~ win2 | district + congress + party, data)
+feols(pri2 ~ mar_cont | district + congress + party, data)
 feols(pri2 ~ mar_cont2 | district + congress + party, data)
 
-feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
-feols(pri2 ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data)
-feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data)
+# baseline with district by party FE
+
+feols(pri1 ~ vs_1_p | district^party + congress, cluster = ~ district, data) #* but negative
+feols(pri1 ~ avg_vs2_p | district^party + congress, cluster = ~ district, data) #*
+feols(pri1 ~ avg_vs3_p | district^party + congress, cluster = ~ district, data) #.
+feols(pri1 ~ avg_vs4_p | district^party + congress, cluster = ~ district, data) #**
+feols(pri1 ~ win4 | district^party + congress, cluster = ~ district, data)
+feols(pri1 ~ win3 | district^party + congress, cluster = ~ district, data)
+feols(pri1 ~ win2 | district^party + congress, cluster = ~ district, data)
+feols(pri1 ~ mar23 | district^party + congress, cluster = ~ district, data)
+feols(pri1 ~ mar23p | district^party + congress, cluster = ~ district, data)
+feols(pri1 ~ mar_cont | district^party + congress, cluster = ~ district, data)
+feols(pri1 ~ mar_cont2 | district^party + congress, cluster = ~ district, data)
+
+feols(pri2 ~ vs_1_p | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ avg_vs2_p | district^party + congress, cluster = ~ district, data) #.
+feols(pri2 ~ avg_vs3_p | district^party + congress, cluster = ~ district, data) #.
+feols(pri2 ~ avg_vs4_p | district^party + congress, cluster = ~ district, data) #***
+feols(pri2 ~ win4 | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ win3 | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ win2 | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar23 | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar23p | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar_cont | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar_cont2 | district^party + congress, cluster = ~ district, data)
+
+# by party
+
+feols(pri2 ~ vs_1_p | district + congress, data %>% filter(party == "mp"))
+feols(pri2 ~ avg_vs3_p | district + congress, data %>% filter(party == "mp"))
+feols(pri2 ~ avg_vs2_p | district + congress, data %>% filter(party == "mp"))
+feols(pri2 ~ avg_vs4_p | district + congress, data %>% filter(party == "mp"))
+feols(pri2 ~ win4 | district + congress, data %>% filter(party == "mp"))
+feols(pri2 ~ win3 | district + congress, data %>% filter(party == "mp"))
+feols(pri2 ~ win2 | district + congress, data %>% filter(party == "mp"))
+feols(pri2 ~ mar_cont | district + congress, data %>% filter(party == "mp"))
+feols(pri2 ~ mar_cont2 | district + congress, data %>% filter(party == "mp"))
+
+feols(pri2 ~ vs_1_p | district + congress, data %>% filter(party == "ppp"))
+feols(pri2 ~ avg_vs3_p | district + congress, data %>% filter(party == "ppp"))
+feols(pri2 ~ avg_vs2_p | district + congress, data %>% filter(party == "ppp"))
+feols(pri2 ~ avg_vs4_p | district + congress, data %>% filter(party == "ppp"))
+feols(pri2 ~ win4 | district + congress, data %>% filter(party == "ppp"))
+feols(pri2 ~ win3 | district + congress, data %>% filter(party == "ppp"))
+feols(pri2 ~ win2 | district + congress, data %>% filter(party == "ppp"))
+feols(pri2 ~ mar_cont | district + congress, data %>% filter(party == "ppp"))
+feols(pri2 ~ mar_cont2 | district + congress, data %>% filter(party == "ppp"))
+
+# with controls (separate FE)
+
+feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling| district + congress + party, cluster = ~ district, data) #**
+feols(pri2 ~ mar23 + prior.pri2 + inc + ruling| district + congress + party, cluster = ~ district, data) #*
+feols(pri2 ~ mar23p + prior.pri2 + inc + ruling| district + congress + party, cluster = ~ district, data) #*
+feols(pri2 ~ mar_cont + prior.pri2 + inc + ruling| district + congress + party, cluster = ~ district, data) #.
+feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling| district + congress + party, cluster = ~ district, data) #*
+
+# with controls (district by party FE)
+
+feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling| district^party + congress, cluster = ~ district, data) 
+feols(pri2 ~ mar23 + prior.pri2 + inc + ruling| district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar23p + prior.pri2 + inc + ruling| district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar_cont + prior.pri2 + inc + ruling| district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling| district^party + congress, cluster = ~ district, data)
+
+# interaction effect (with separate FE)
+
+feols(pri2 ~ vs_1_p*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ avg_vs2_p*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ avg_vs3_p*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ avg_vs4_p*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ win4*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ win3*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ win2*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar23*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar23p*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar_cont*ruling | district + party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar_cont2*ruling | district + party + congress, cluster = ~ district, data)
+
+
+# interaction effect (district by party FE)
+
+feols(pri2 ~ vs_1_p*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ avg_vs2_p*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ avg_vs3_p*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ avg_vs4_p*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ win4*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ win3*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ win2*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar23*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar23p*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar_cont*ruling | district^party + congress, cluster = ~ district, data)
+feols(pri2 ~ mar_cont2*ruling | district^party + congress, cluster = ~ district, data)
 
 #---------------------------------------------
 
@@ -1246,6 +1408,14 @@ data %>% select(congress, district, party, ruling, n.app, ruling) %>%
 # ruling parties hold primaries more often (maybe because of expected spoils)
 # but less likely to use primaries in safe districts (maybe because they have other resources to give in exchange)
 
+# interaction
+
+feols(pri2 ~ vs_1_p*ruling | district + congress + party, data)
+feols(pri2 ~ avg_vs4_p*ruling | district + congress + party, data)
+feols(pri2 ~ win4*ruling | district + congress + party, data)
+feols(pri2 ~ mar_cont2*ruling | district + congress + party, data)
+
+
 # interaction with controls
 
 feols(pri2 ~ vs_1_p*ruling + prior.pri2 + inc | district + congress + party, data)
@@ -1261,15 +1431,11 @@ feols(pri2 ~ mar_cont2*ruling + prior.pri2 + inc | district + congress + party, 
 ## Plot Interaction Effects
 #---------------------------------------------
 
-library(gridExtra)
-
-
 ## Voteshare
 
 im1 <- feols(pri2 ~ vs_1_p*ruling | district + congress + party, data)
 # negative interaction but not significant
-data_im1 <- data %>%
-  expand.grid(vs_1_p = seq(min(data$vs_1_p, na.rm=T), max(data$vs_1_p, na.rm=T), length.out = 100),
+data_im1 <- expand.grid(vs_1_p = seq(min(data$vs_1_p, na.rm=T), max(data$vs_1_p, na.rm=T), length.out = 100),
               ruling = unique(data$ruling),
               district = unique(data$district)[1],  # Fix one district (or average effects)
               congress = unique(data$congress)[1],  # Fix one congress
@@ -1278,21 +1444,19 @@ data_im1$predicted_pri2 <- predict(im1, newdata = data_im1)
 
 plot1 <- ggplot(data_im1, aes(x = vs_1_p, y = predicted_pri2, color = factor(ruling))) +
   geom_line() +
-    ylim(0,0.6) + xlim(0,0.8) +
+    ylim(0,0.8) + xlim(0,0.8) +
   labs(x = "Vote Share (previous election)",
        y = "Probability of Primaries",
        color = "Ruling") +
   scale_color_manual(name = "",
                      labels = c("Non-ruling Party", "Ruling Party"),
-                     values=c("purple4", "royalblue2")) +
-  theme(legend.position = "none")
+                     values=c("purple4", "royalblue2")) 
 
 ## Avg Voteshare
 
 im2 <- feols(pri2 ~ avg_vs4_p*ruling | district + congress + party, data)
 # negative interaction but not significant
-data_im2 <- data %>%
-  expand.grid(avg_vs4_p = seq(min(data$avg_vs4_p, na.rm=T), max(data$avg_vs4_p, na.rm=T), length.out = 100),
+data_im2 <- expand.grid(avg_vs4_p = seq(min(data$avg_vs4_p, na.rm=T), max(data$avg_vs4_p, na.rm=T), length.out = 100),
               ruling = unique(data$ruling),
               district = unique(data$district)[1],  # Fix one district (or average effects)
               congress = unique(data$congress)[1],  # Fix one congress
@@ -1301,40 +1465,37 @@ data_im2$predicted_pri2 <- predict(im2, newdata = data_im2)
 
 plot2 <- ggplot(data_im2, aes(x = avg_vs4_p, y = predicted_pri2, color = factor(ruling))) +
   geom_line() +
-    ylim(0,0.6) + xlim(0,0.8) +
+    ylim(0,0.8) + xlim(0,0.8) +
   labs(x = "Vote Share (previous 4 avg)",
        y = "",
        color = "Ruling") +
   scale_color_manual(name = "",
                      labels = c("Non-ruling Party", "Ruling Party"),
-                     values=c("purple4", "royalblue2")) +
-  theme(legend.position = "none")
+                     values=c("purple4", "royalblue2")) 
 
 ## MoV
 
-im3 <- feols(pri2 ~ mar_cont2*ruling | district + congress + party, data)
+im3 <- feols(pri2 ~ mar_cont*ruling | district + congress + party, data)
 # iv: 0.72; (value when ruling=0) predicted prob of primary when non ruling party 0.72
 # ruling: 0.12 (value when iv=0) predicted prob of primary in close district 0.12
 # interaction: -0.88; (difference in slope b/w ruling v. non-ruling) predicted prob when ruling 0.72-0.88 = -0.16 
 
-data_im3 <- data %>%
-  expand.grid(mar_cont2 = seq(min(data$mar_cont2), max(data$mar_cont2), length.out = 100),
+data_im3 <- expand.grid(mar_cont = seq(min(data$mar_cont, na.rm=T), max(data$mar_cont, na.rm=T), length.out = 100),
               ruling = unique(data$ruling),
               district = unique(data$district)[1],  # Fix one district (or average effects)
               congress = unique(data$congress)[1],  # Fix one congress
               party = unique(data$party)[1])        # Fix one party
 data_im3$predicted_pri2 <- predict(im3, newdata = data_im3)
 
-plot3 <- ggplot(data_im3, aes(x = mar_cont2, y = predicted_pri2, color = factor(ruling))) +
+plot3 <- ggplot(data_im3, aes(x = mar_cont, y = predicted_pri2, color = factor(ruling))) +
   geom_line() +
-    ylim(0,0.6) + xlim(0,0.8) +
+    ylim(0,0.8) + xlim(0,0.8) +
   labs(x = "Margin of Victory",
        y = "Probability of Primaries",
        color = "Ruling") +
   scale_color_manual(name = "",
                      labels = c("Non-ruling Party", "Ruling Party"),
-                     values=c("purple4", "royalblue2")) +
-  theme(legend.position = "none")
+                     values=c("purple4", "royalblue2")) 
 
 ## Win 4
 
@@ -1343,8 +1504,7 @@ im4 <- feols(pri2 ~ win4*ruling | district + congress + party, data)
 # ruling: 0.13
 # interaction: -0.17; pred prob for ruling 0.25-0.17=0.08
 
-data_im4 <- data %>%
-  expand.grid(win4 = seq(min(data$win4, na.rm=T), max(data$win4, na.rm=T), length.out = 100),
+data_im4 <- expand.grid(win4 = seq(min(data$win4, na.rm=T), max(data$win4, na.rm=T), length.out = 100),
               ruling = unique(data$ruling),
               district = unique(data$district)[1],  # Fix one district (or average effects)
               congress = unique(data$congress)[1],  # Fix one congress
@@ -1353,37 +1513,31 @@ data_im4$predicted_pri2 <- predict(im4, newdata = data_im4)
 
 plot4 <- ggplot(data_im4, aes(x = win4, y = predicted_pri2, color = factor(ruling))) +
   geom_line() +
-  ylim(0,0.6) + xlim(0,0.8) +
+  ylim(0,0.8) + xlim(0,0.8) +
   labs(x = "Share of Wins",
        y = "",
        color = "Ruling") +
   scale_color_manual(name = "",
                      labels = c("Non-ruling Party", "Ruling Party"),
-                     values=c("purple4", "royalblue2")) +
-  theme(legend.position = "none")
+                     values=c("purple4", "royalblue2")) 
 
 ## in grids
+library(cowplot)
 
-library(gtable)
-get_legend <- function(myggplot) {
-  tmp <- ggplotGrob(myggplot)
-  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
-  legend <- tmp$grobs[[leg]]
-  return(legend)
-}
-shared_legend <- get_legend(plot1)
+int <- plot_grid(
+  plot1 + theme(legend.position = "none"),
+  plot2 + theme(legend.position = "none"),
+  plot3 + theme(legend.position = "none"),
+  plot4 + theme(legend.position = "none"),
+  ncol = 2, nrow = 2)
 
-int <- grid.arrange(
-  arrangeGrob(plot1, plot2, plot3, plot4, ncol = 2), # Combine the plots
-  shared_legend,                                    # Add the shared legend
-  nrow = 2,
-  heights = c(10, 1)                                # Adjust heights: more space for plots
-)
+legend <- get_legend(plot1)
 
-ggsave("interaction.png", plot = int,
-       width = 6, height = 4.5)
+final_plot <- plot_grid(int, legend, ncol = 1, rel_heights = c(1, 0.1))
+
+ggsave("interaction.png", plot = final_plot,
+       width = 6, height = 6.7)
 #---------------------------------------------
-
 
 
 #---------------------------------------------
@@ -1410,51 +1564,23 @@ library(dotwhisker)
 
 vs1 <- tidy(feols(pri2 ~ vs_1_p | district + congress + party, data), conf.int = T)
 vs4 <- tidy(feols(pri2 ~ avg_vs4_p | district + congress + party, data), conf.int = T)
-mar <- tidy(feols(pri2 ~ mar23 | district + congress + party, data), conf.int = T)
+mar_ct <- tidy(feols(pri2 ~ mar_cont | district + congress + party, data), conf.int = T)
 win <- tidy(feols(pri2 ~ win4 | district + congress + party, data), conf.int = T)
 
 vs1_c <- tidy(feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
-mar_c <- tidy(feols(pri2 ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
-
-plot_iv <- data.frame(rbind(vs1, vs4, win, mar))
-plot_c <- data.frame(rbind(vs1_c, mar_c)) %>% filter(term %in% c("vs_1_p", "mar23"))
-plot <- rbind(plot_iv %>% mutate(model = "basic"),
-              plot_c %>% mutate(model = "w/controls"))
-
-dwplot(plot,
-       vars_order = c("vs_1_p", "avg_vs4_p", "mar23", "win4"),
-       model_order = c("basic", "w/controls")) %>% 
-  relabel_predictors(c(vs_1_p = "Vote Share \n (previous election)",
-                       avg_vs4_p = "Vote Share \n (previous 4 avg)",
-                       mar23 = "Margin of Victory \n (23%)",
-                       win4 = "Share of Wins")) +
-  xlab("Probability of Primaries") + ylab("") +
-  geom_vline(xintercept=0, linetype=3) +
-  ggtitle("") +
-  scale_color_manual(name = "",
-                     labels = c("w/controls", "baseline"),
-                     values=c("#4E84C4", "#293352")) +
-  theme(legend.position = "bottom") 
-
-ggsave("main.png", plot = last_plot(),
-       width = 6, height = 4)
-
-
-# with margin as continuous variable
-mar_ct <- tidy(feols(pri2 ~ mar_cont2 | district + congress + party, data), conf.int = T)
-mar_ct2 <- tidy(feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
+mar_ct2 <- tidy(feols(pri2 ~ mar_cont + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
 
 plot_iv <- data.frame(rbind(vs1, vs4, win, mar_ct))
-plot_c <- data.frame(rbind(vs1_c, mar_ct2)) %>% filter(term %in% c("vs_1_p", "mar_cont2"))
+plot_c <- data.frame(rbind(vs1_c, mar_ct2)) %>% filter(term %in% c("vs_1_p", "mar_cont"))
 plot <- rbind(plot_iv %>% mutate(model = "basic"),
               plot_c %>% mutate(model = "w/controls"))
 
 dwplot(plot,
-       vars_order = c("vs_1_p", "avg_vs4_p", "mar_cont2", "win4"),
+       vars_order = c("vs_1_p", "avg_vs4_p", "mar_cont", "win4"),
        model_order = c("basic", "w/controls")) %>% 
   relabel_predictors(c(vs_1_p = "Vote Share \n (previous election)",
                        avg_vs4_p = "Vote Share \n (previous 4 avg)",
-                       mar_cont2 = "Margin of Victory",
+                       mar_cont = "Margin of Victory",
                        win4 = "Share of Wins")) +
   xlab("Probability of Primaries") + ylab("") +
   geom_vline(xintercept=0, linetype=3) +
@@ -1474,51 +1600,23 @@ ggsave("main_cont.png", plot = last_plot(),
 #---------------------------------------------
 vs1.n <- tidy(feols(n.app ~ vs_1_p | district + congress + party, data), conf.int = T)
 vs4.n <- tidy(feols(n.app ~ avg_vs4_p | district + congress + party, data), conf.int = T)
-mar.n <- tidy(feols(n.app ~ mar23 | district + congress + party, data), conf.int = T)
+mar.nc <- tidy(feols(n.app ~ mar_cont | district + congress + party, data), conf.int = T)
 win.n <- tidy(feols(n.app ~ win4 | district + congress + party, data), conf.int = T)
 
 vs1_c.n <- tidy(feols(n.app ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
-mar_c.n <- tidy(feols(n.app ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
-
-plot_iv.n <- data.frame(rbind(vs1.n, vs4.n, win.n, mar.n))
-plot_c.n <- data.frame(rbind(vs1_c.n, mar_c.n)) %>% filter(term %in% c("vs_1_p", "mar23"))
-plot.n <- rbind(plot_iv.n %>% mutate(model = "basic"),
-              plot_c.n %>% mutate(model = "w/controls"))
-
-dwplot(plot.n,
-       vars_order = c("vs_1_p", "avg_vs4_p", "mar23", "win4"),
-       model_order = c("basic", "w/controls")) %>% 
-  relabel_predictors(c(vs_1_p = "Vote Share \n (previous election)",
-                       avg_vs4_p = "Vote Share \n (previous 4 avg)",
-                       mar23 = "Margin of Victory \n (23%)",
-                       win4 = "Share of Wins")) +
-  xlab("Effect on Number of Applicants") + ylab("") +
-  geom_vline(xintercept=0, linetype=3) +
-  ggtitle("") +
-  scale_color_manual(name = "",
-                     labels = c("w/controls", "baseline"),
-                     values=c("#4E84C4", "#293352")) +
-  theme(legend.position = "bottom") 
-
-ggsave("mech.png", plot = last_plot(),
-       width = 6, height = 4)
-
-
-# with margin as continuous
-mar.nc <- tidy(feols(n.app ~ mar_cont2 | district + congress + party, data), conf.int = T)
-mar_c.nc2 <- tidy(feols(n.app ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
+mar_c.nc2 <- tidy(feols(n.app ~ mar_cont + prior.pri2 + inc + ruling | district + congress + party, data), conf.int = T)
 
 plot_iv.n <- data.frame(rbind(vs1.n, vs4.n, win.n, mar.nc))
-plot_c.n <- data.frame(rbind(vs1_c.n, mar_c.nc2)) %>% filter(term %in% c("vs_1_p", "mar_cont2"))
+plot_c.n <- data.frame(rbind(vs1_c.n, mar_c.nc2)) %>% filter(term %in% c("vs_1_p", "mar_cont"))
 plot.n <- rbind(plot_iv.n %>% mutate(model = "basic"),
                 plot_c.n %>% mutate(model = "w/controls"))
 
 dwplot(plot.n,
-       vars_order = c("vs_1_p", "avg_vs4_p", "mar_cont2", "win4"),
+       vars_order = c("vs_1_p", "avg_vs4_p", "mar_cont", "win4"),
        model_order = c("basic", "w/controls")) %>% 
   relabel_predictors(c(vs_1_p = "Vote Share \n (previous election)",
                        avg_vs4_p = "Vote Share \n (previous 4 avg)",
-                       mar_cont2 = "Margin of Victory",
+                       mar_cont = "Margin of Victory",
                        win4 = "Share of Wins")) +
   xlab("Effect on Number of Applicants") + ylab("") +
   geom_vline(xintercept=0, linetype=3) +
@@ -1567,17 +1665,20 @@ log_predict <- function(cong, part, yr){
 log19m <- log_predict(cong = 19, part = "mp", yr = 2012)
 log20m <- log_predict(cong = 20, part = "mp", yr = 2016)
 log21m <- log_predict(cong = 21, part = "mp", yr = 2020)
+log22m <- log_predict(cong = 22, part = "mp", yr = 2024)
 log19p <- log_predict(cong = 19, part = "ppp", yr = 2012)
 log20p <- log_predict(cong = 20, part = "ppp", yr = 2016)
 log21p <- log_predict(cong = 21, part = "ppp", yr = 2020)
+log22p <- log_predict(cong = 22, part = "ppp", yr = 2024)
 
-pred <- rbind(log19m, log20m, log21m, log19p, log20p, log21p) %>%
+pred <- rbind(log19m, log20m, log21m, log22m, log19p, log20p, log21p, log22p) %>%
   mutate(party = ifelse(party == "mp", "MP", "PPP"))
 
-
 log_rug <- data %>% select(avg_vs4_p, party, congress) %>% filter(avg_vs4_p <= 0.80) %>%
-  mutate(year = ifelse(congress == 19, 2012, 
-                       ifelse(congress == 20, 2016, 2020)),
+  mutate(year = case_when(congress == 19 ~ 2012,
+                          congress == 20 ~ 2016,
+                          congress == 21 ~ 2020,
+                          congress == 22 ~ 2024),
          party = ifelse(party == "mp", "MP", "PPP")) 
 
 ggplot(pred, aes(range, V1)) + geom_point(aes(color = party), size = 0.5) +
@@ -1607,26 +1708,32 @@ ggsave("log.png", plot = last_plot(),
 
 # safeness ~ primary
 
-a <- feols(pri2 ~ vs_1_p | district + congress + party, data)
-b <- feols(pri2 ~ avg_vs4_p | district + congress + party, data)
-c <- feols(pri2 ~ mar23 | district + congress + party, data)
-d <- feols(pri2 ~ win4 | district + congress + party, data)
-e <- feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
-f <- feols(pri2 ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data)
-h <- feols(pri2 ~ mar_cont2 | district + congress + party, data)
-i <- feols(pri2 ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data)
+b1 <- feols(pri2 ~ vs_1_p | district + congress + party, data)
+b2 <- feols(pri2 ~ avg_vs4_p | district + congress + party, data)
+b3 <- feols(pri2 ~ mar_cont | district + congress + party, data)
+b4 <- feols(pri2 ~ win4 | district + congress + party, data)
+b1_c <- feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
+b3_c <- feols(pri2 ~ mar_cont + prior.pri2 + inc + ruling | district + congress + party, data)
 
-etable(a, b, h, d, e, i,
-       title = "Safeness of District and Probability of Primary",
+base <- etable(b1, b2, b3, b4, b1_c, b3_c, 
+#       title = "Safeness of District and Probability of Primary",
        tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
        digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
        dict=c(vs_1_p = "Previous Voteshare", avg_vs4_p = "Avg Voteshare",
-              mar_cont2 = "Winning Margin", win4 = "Share of Wins",
+              mar_cont = "Winning Margin", win4 = "Share of Wins",
               prior.pri2 = "Prior Primary", inc = "Incumbency",
               ruling = "Ruling Party", 
               pri2 = "Primary"))
 
+writeLines(base, "base.tex")
+
+
 # interaction
+
+im1 <- feols(pri2 ~ vs_1_p*ruling | district + congress + party, data)
+im2 <- feols(pri2 ~ avg_vs4_p*ruling | district + congress + party, data)
+im3 <- feols(pri2 ~ mar_cont*ruling | district + congress + party, data)
+im4 <- feols(pri2 ~ win4*ruling | district + congress + party, data)
 
 lat1 <- etable(im1,
        tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
@@ -1643,7 +1750,7 @@ lat2 <- etable(im2,
 lat3 <- etable(im3,
        tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
        digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
-       dict=c(mar_cont2 = "Winning Margin", ruling = "Ruling",
+       dict=c(mar_cont = "Winning Margin", ruling = "Ruling",
               pri2 = "Primary"))
 
 lat4 <- etable(im4,
@@ -1659,24 +1766,24 @@ writeLines(lat4, "table4.tex")
 
 # safeness ~ applicants
 
-g <- feols(n.app ~ vs_1_p | district + congress + party, data)
-h <- feols(n.app ~ avg_vs4_p | district + congress + party, data)
-i <- feols(n.app ~ mar23 | district + congress + party, data)
-j <- feols(n.app ~ win4 | district + congress + party, data)
-k <- feols(n.app ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
-l <- feols(n.app ~ mar23 + prior.pri2 + inc + ruling | district + congress + party, data)
-m <- feols(n.app ~ mar_cont2 | district + congress + party, data)
-n <- feols(n.app ~ mar_cont2 + prior.pri2 + inc + ruling | district + congress + party, data)
+a1 <- feols(n.app ~ vs_1_p | district + congress + party, data)
+a2 <- feols(n.app ~ avg_vs4_p | district + congress + party, data)
+a3 <- feols(n.app ~ mar_cont | district + congress + party, data)
+a4 <- feols(n.app ~ win4 | district + congress + party, data)
+a1_c <- feols(n.app ~ vs_1_p + prior.pri2 + inc + ruling | district + congress + party, data)
+a3_c <- feols(n.app ~ mar_cont + prior.pri2 + inc + ruling | district + congress + party, data)
 
-etable(g, h, m, j, k, n,
-       title = "Safeness of District and Number of Applicants",
+app <- etable(a1, a2, a3, a4, a1_c, a3_c, 
+#       title = "Safeness of District and Number of Applicants",
        tex = TRUE, style.tex = style.tex("aer",tabular="*"), 
        digits = 3, digits.stats = 3, fitstat = c('n', 'r2'),
        dict=c(vs_1_p = "Previous Voteshare", avg_vs4_p = "Avg Voteshare",
-              mar_cont2 = "Winning Margin", win4 = "Share of Wins",
+              mar_cont = "Winning Margin", win4 = "Share of Wins",
               prior.pri2 = "Prior Primary", inc = "Incumbency",
               ruling = "Ruling Party", 
               n.app = "Number of Applicants"))
+
+writeLines(app, "app.tex")
 
 #---------------------------------------------
 
