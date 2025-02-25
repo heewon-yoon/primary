@@ -1291,29 +1291,357 @@ data %>%
 # Regression
 ```{r}
 #---------------------------------------------
+# Analysis: year FE + party FE
+#---------------------------------------------
+
+## year FE + party FE
+
+# baseline
+
+feols(pri2 ~ vs_1_p | congress + party, cluster = ~district, data)
+feols(pri2 ~ avg_vs2_p | congress + party, cluster = ~district, data)
+feols(pri2 ~ avg_vs3_p | congress + party, cluster = ~district, data)
+feols(pri2 ~ avg_vs4_p | congress + party, cluster = ~district, data)
+feols(pri2 ~ win4 | congress + party, cluster = ~district, data)
+feols(pri2 ~ win3 | congress + party, cluster = ~district, data)
+feols(pri2 ~ win2 | congress + party, cluster = ~district, data)
+feols(pri2 ~ win1 | congress + party, cluster = ~district, data)
+
+# w/ controls
+
+feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | congress + party, cluster = ~district, data)
+feols(pri2 ~ win1 + prior.pri2 + inc + ruling | congress + party, cluster = ~district, data)
+
+# interaction 
+
+feols(pri2 ~ vs_1_p*ruling | congress + party, cluster = ~district, data)
+feols(pri2 ~ avg_vs2_p*ruling | congress + party, cluster = ~district, data)
+feols(pri2 ~ avg_vs3_p*ruling | congress + party, cluster = ~district, data)
+feols(pri2 ~ avg_vs4_p*ruling | congress + party, cluster = ~district, data)
+feols(pri2 ~ win4*ruling | congress + party, cluster = ~district, data)
+feols(pri2 ~ win3*ruling | congress + party, cluster = ~district, data)
+feols(pri2 ~ win2*ruling | congress + party, cluster = ~district, data)
+feols(pri2 ~ win1*ruling | congress + party, cluster = ~district, data)
+
+#---------------------------------------------
+# coefficient plot: vs1-4, avg1-4 (revised)
+#---------------------------------------------
+library(broom)
+library(dotwhisker)
+
+vs1 <- tidy(feols(pri2 ~ vs_1_p | congress + party, cluster = ~district, data), conf.int = T)
+vs2 <- tidy(feols(pri2 ~ avg_vs2_p | congress + party, cluster = ~district, data), conf.int = T)
+vs3 <- tidy(feols(pri2 ~ avg_vs3_p | congress + party, cluster = ~district, data), conf.int = T)
+vs4 <- tidy(feols(pri2 ~ avg_vs4_p | congress + party, cluster = ~district, data), conf.int = T)
+
+vs1_c <- tidy(feols(pri2 ~ vs_1_p + prior.pri2 + inc + ruling | congress + party, cluster = ~district, data), conf.int = T)
+
+w1 <- tidy(feols(pri2 ~ win1 | congress + party, cluster = ~district, data), conf.int = T)
+w2 <- tidy(feols(pri2 ~ win2 | congress + party, cluster = ~district, data), conf.int = T)
+w3 <- tidy(feols(pri2 ~ win3 | congress + party, cluster = ~district, data), conf.int = T)
+w4 <- tidy(feols(pri2 ~ win4 | congress + party, cluster = ~district, data), conf.int = T)
+
+w1_c <- tidy(feols(pri2 ~ win1 + prior.pri2 + inc + ruling | congress + party, cluster = ~district, data), conf.int = T)
+
+plot_iv <- data.frame(rbind(vs1, vs2, vs3, vs4))
+plot_c <- data.frame(rbind(vs1_c)) %>% filter(term %in% c("vs_1_p"))
+plot <- rbind(plot_iv %>% mutate(model = "basic"),
+              plot_c %>% mutate(model = "w/controls"))
+
+plot_iv2 <- data.frame(rbind(w1, w2, w3, w4))
+plot_c2 <- data.frame(rbind(w1_c)) %>% filter(term %in% c("win1"))
+plot2 <- rbind(plot_iv2 %>% mutate(model = "basic"),
+              plot_c2 %>% mutate(model = "w/controls"))
+
+vs <- dwplot(plot,
+       vars_order = c("vs_1_p", "avg_vs2_p", "avg_vs3_p", "avg_vs4_p"),
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(vs_1_p = "Previous Election",
+                       avg_vs2_p = "Avg 2 Previous",
+                       avg_vs3_p = "Avg 3 Previous",
+                       avg_vs4_p = "Avg 4 Previous")) +
+  xlab("Probability of Primaries") + ylab("") + xlim(-0.1, 0.85) +
+  geom_vline(xintercept=0, linetype=2, col="red") +
+  ggtitle("Vote Share") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(size = 12, hjust = 0.5)) 
+
+win <- dwplot(plot2,
+       vars_order = c("win1", "win2", "win3", "win4"),
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(win1 = "Previous Election",
+                       win2 = "Avg 2 Previous",
+                       win3 = "Avg 3 Previous",
+                       win4 = "Avg 4 Previous")) +
+  xlab("Probability of Primaries") + ylab("") + xlim(-0.1, 0.85) +
+  geom_vline(xintercept=0, linetype=2, col="red") +
+  ggtitle("Share of Wins") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(size = 12, hjust = 0.5)) 
+
+a <- plot_grid(vs + theme(plot.title = element_text(face = "bold", hjust = 0.5, vjust = -1, margin = margin(b = 10)), legend.position = "none"), win + theme(plot.title = element_text(face = "bold", hjust = 0.5, vjust = -1, margin = margin(b = 10)), legend.position = "none"), ncol=1, nrow=2)
+legend2 <- get_legend(vs)
+plot_grid(a, legend2, ncol=1,  rel_heights = c(1, 0.1))
+
+ggsave("coef_win_yearparty.png", plot = last_plot(),
+       width = 6, height = 4)
+
+#---------------------------------------------
+## coef: n.app
+#---------------------------------------------
+
+vs1.n <- tidy(feols(n.app ~ vs_1_p | congress + party, cluster = ~district, data), conf.int = T)
+vs2.n <- tidy(feols(n.app ~ avg_vs2_p | congress + party, cluster = ~district, data), conf.int = T)
+vs3.n <- tidy(feols(n.app ~ avg_vs3_p | congress + party, cluster = ~district, data), conf.int = T)
+vs4.n <- tidy(feols(n.app ~ avg_vs4_p | congress + party, cluster = ~district, data), conf.int = T)
+
+vs1_c.n <- tidy(feols(n.app ~ vs_1_p + prior.pri2 + inc + ruling | congress + party, cluster = ~district, data), conf.int = T)
+
+w1.n <- tidy(feols(n.app ~ win1 | congress + party, cluster = ~district, data), conf.int = T)
+w2.n <- tidy(feols(n.app ~ win2 | congress + party, cluster = ~district, data), conf.int = T)
+w3.n <- tidy(feols(n.app ~ win3 | congress + party, cluster = ~district, data), conf.int = T)
+w4.n <- tidy(feols(n.app ~ win4 | congress + party, cluster = ~district, data), conf.int = T)
+
+w1_c.n <- tidy(feols(n.app ~ win1 + prior.pri2 + inc + ruling | congress + party, cluster = ~district, data), conf.int = T)
+
+plot_iv.n <- data.frame(rbind(vs1.n, vs2.n, vs3.n, vs4.n))
+plot_c.n <- data.frame(rbind(vs1_c.n)) %>% filter(term %in% c("vs_1_p"))
+plot.n <- rbind(plot_iv.n %>% mutate(model = "basic"),
+              plot_c.n %>% mutate(model = "w/controls"))
+
+plot_iv2.n <- data.frame(rbind(w1.n, w2.n, w3.n, w4.n))
+plot_c2.n <- data.frame(rbind(w1_c.n)) %>% filter(term %in% c("win1"))
+plot2.n <- rbind(plot_iv2.n %>% mutate(model = "basic"),
+              plot_c2.n %>% mutate(model = "w/controls"))
+
+vs.n <- dwplot(plot.n,
+       vars_order = c("vs_1_p", "avg_vs2_p", "avg_vs3_p", "avg_vs4_p"),
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(vs_1_p = "Previous Election",
+                       avg_vs2_p = "Avg 2 Previous",
+                       avg_vs3_p = "Avg 3 Previous",
+                       avg_vs4_p = "Avg 4 Previous")) +
+  xlab("Effect on Number of Applicants") + ylab("") +
+  geom_vline(xintercept=0, linetype=3) +
+  ggtitle("Vote Share") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(size = 12, hjust = 0.5)) 
+
+win.n <- dwplot(plot2.n,
+       vars_order = c("win1", "win2", "win3", "win4"),
+       model_order = c("basic", "w/controls")) %>% 
+  relabel_predictors(c(win1 = "Previous Election",
+                       win2 = "Avg 2 Previous",
+                       win3 = "Avg 3 Previous",
+                       win4 = "Avg 4 Previous")) +
+  xlab("Effect on Number of Applicants") + ylab("") +
+  geom_vline(xintercept=0, linetype=3) +
+  ggtitle("Share of Wins") +
+  scale_color_manual(name = "",
+                     labels = c("w/controls", "baseline"),
+                     values=c("#4E84C4", "#293352")) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(size = 12, hjust = 0.5)) 
+
+b <- plot_grid(vs.n + theme(plot.title = element_text(face = "bold", hjust = 0.5, vjust = -1, margin = margin(b = 10)), legend.position = "none"), win.n + theme(plot.title = element_text(face = "bold", hjust = 0.5, vjust = -1, margin = margin(b = 10)), legend.position = "none"), ncol=1, nrow=2)
+legend2 <- get_legend(vs.n)
+plot_grid(b, legend2, ncol=1,  rel_heights = c(1, 0.1))
+
+ggsave("coef_napp_yearparty.png", plot = last_plot(),
+       width = 6, height = 4)
+
+#---------------------------------------------
+## Plot Interaction Effects
+#---------------------------------------------
+# Ensure that fixed-effect variables are factors and drop any unused levels
+data$congress <- droplevels(factor(data$congress))
+data$party <- droplevels(factor(data$party))
+data$ruling <- factor(data$ruling)  # Ensure ruling is a factor as well
+
+# Define a function to extract coefficients, standard errors, and confidence intervals
+extract_effects <- function(model) {
+  # Calculate coefficients
+  coef_ruling_0 <- coef(model)[1]
+  coef_ruling_1 <- coef(model)[1] + coef(model)[3]
+  coef_int <- coef(model)[3]
+  
+  # Calculate standard errors
+  std_err_ruling_0 <- sqrt(vcov(model)[1, 1])
+  std_err_ruling_1 <- sqrt(vcov(model)[1, 1] + vcov(model)[3, 3] + 2 * vcov(model)[1, 3])
+  std_err_int <- sqrt(vcov(model)[3, 3])
+  
+  # Create a data frame
+  results_df <- data.frame(
+    Coefficient = c(coef_ruling_0, coef_ruling_1, coef_int),
+    Std_Error = c(std_err_ruling_0, std_err_ruling_1, std_err_int),
+    group = factor(c("Ruling = 0", "Ruling = 1", "Interaction"),
+                   levels = c("Ruling = 0", "Ruling = 1", "Interaction"),
+                   labels = c("Non-ruling", "Ruling", "Difference"))
+  ) %>%
+  mutate(
+    lowerci = Coefficient - 1.96 * Std_Error,
+    upperci = Coefficient + 1.96 * Std_Error
+  )
+  
+  return(results_df)
+}
+
+# voteshare
+im1 <- feols(pri2 ~ vs_1_p*ruling | congress + party, cluster = ~district, data)
+result_im1 <- extract_effects(im1)
+plot1 <- ggplot(result_im1, aes(x = group, y = Coefficient)) +
+  geom_point(size = 2) +  # Dot for the coefficient
+  geom_errorbar(aes(ymin = lowerci, ymax = upperci), width = 0.2, color = "black") +  # Whiskers for CI
+  geom_hline(yintercept = 0, linetype = 3,  col="red") +  ylim(-1.2,1.2) +
+  labs(title = "",x = "Previous Election", 
+       y = "Marginal Effect") +
+  theme(axis.title.x = element_text(margin = margin(t = 10)))
+
+# avg 2 voteshare
+im2 <- feols(pri2 ~ avg_vs2_p*ruling | congress + party, cluster = ~district, data)
+result_im2 <- extract_effects(im2)
+plot2 <- ggplot(result_im2, aes(x = group, y = Coefficient)) +
+  geom_point(size = 2) +  # Dot for the coefficient
+  geom_errorbar(aes(ymin = lowerci, ymax = upperci), width = 0.2, color = "black") +  # Whiskers for CI
+  geom_hline(yintercept = 0, linetype = 3,  col="red") + ylim(-1.2,1.2) +
+  labs(title = "",x = "Avg 2 Previous",
+       y = "") +
+  theme(axis.title.x = element_text(margin = margin(t = 10)))
+
+# avg 3 voteshare
+im3 <- feols(pri2 ~ avg_vs3_p*ruling | congress + party, cluster = ~district, data)
+result_im3 <- extract_effects(im3)
+plot3 <- ggplot(result_im3, aes(x = group, y = Coefficient)) +
+  geom_point(size = 2) +  # Dot for the coefficient
+  geom_errorbar(aes(ymin = lowerci, ymax = upperci), width = 0.2, color = "black") +  # Whiskers for CI
+  geom_hline(yintercept = 0, linetype = 3,  col="red") + ylim(-1.2,1.2) +
+  labs(title = "",x = "Avg 3 Previous",
+       y = "") +
+  theme(axis.title.x = element_text(margin = margin(t = 10)))
+
+# avg 4 voteshare
+im4 <- feols(pri2 ~ avg_vs4_p*ruling | congress + party, cluster = ~district, data)
+result_im4 <- extract_effects(im4)
+plot4 <- ggplot(result_im4, aes(x = group, y = Coefficient)) +
+  geom_point(size = 2) +  # Dot for the coefficient
+  geom_errorbar(aes(ymin = lowerci, ymax = upperci), width = 0.2, color = "black") +  # Whiskers for CI
+  geom_hline(yintercept = 0, linetype = 3,  col="red") + ylim(-1.2,1.2) +
+  labs(title = "",x = "Avg 4 Previous",
+       y = "") +
+  theme(axis.title.x = element_text(margin = margin(t = 10)))
+
+# win1
+im5 <- feols(pri2 ~ win1*ruling | congress + party, cluster = ~district, data)
+result_im5 <- extract_effects(im5)
+plot5 <- ggplot(result_im5, aes(x = group, y = Coefficient)) +
+  geom_point(size = 2) +  # Dot for the coefficient
+  geom_errorbar(aes(ymin = lowerci, ymax = upperci), width = 0.2, color = "black") +  # Whiskers for CI
+  geom_hline(yintercept = 0, linetype = 3,  col="red") +  ylim(-1.2,1.2) +
+  labs(title = "",x = "Previous Election",
+       y = "Marginal Effect") +
+  theme(axis.title.x = element_text(margin = margin(t = 10)))
+
+# win2
+im6 <- feols(pri2 ~ win2*ruling | congress + party, cluster = ~district, data)
+result_im6 <- extract_effects(im6)
+plot6 <- ggplot(result_im6, aes(x = group, y = Coefficient)) +
+  geom_point(size = 2) +  # Dot for the coefficient
+  geom_errorbar(aes(ymin = lowerci, ymax = upperci), width = 0.2, color = "black") +  # Whiskers for CI
+  geom_hline(yintercept = 0, linetype = 3,  col="red") +  ylim(-1.2,1.2) +
+  labs(title = "",x = "Avg 2 Previous",
+       y = "") +
+  theme(axis.title.x = element_text(margin = margin(t = 10)))
+
+# win3
+im7 <- feols(pri2 ~ win3*ruling | congress + party, cluster = ~district, data)
+result_im7 <- extract_effects(im7)
+plot7 <- ggplot(result_im7, aes(x = group, y = Coefficient)) +
+  geom_point(size = 2) +  # Dot for the coefficient
+  geom_errorbar(aes(ymin = lowerci, ymax = upperci), width = 0.2, color = "black") +  # Whiskers for CI
+  geom_hline(yintercept = 0, linetype = 3,  col="red") +  ylim(-1.2,1.2) +
+  labs(title = "",x = "Avg 3 Previous",
+       y = "") +
+  theme(axis.title.x = element_text(margin = margin(t = 10)))
+
+# win4
+im8 <- feols(pri2 ~ win4*ruling | congress + party, cluster = ~district, data)
+result_im8 <- extract_effects(im8)
+plot8 <- ggplot(result_im8, aes(x = group, y = Coefficient)) +
+  geom_point(size = 2) +  # Dot for the coefficient
+  geom_errorbar(aes(ymin = lowerci, ymax = upperci), width = 0.2, color = "black") +  # Whiskers for CI
+  geom_hline(yintercept = 0, linetype = 3,  col="red") +  ylim(-1.2,1.2) +
+  labs(title = "",x = "Avg 4 Previous",
+       y = "") +
+  theme(axis.title.x = element_text(margin = margin(t = 10))) # Adds spacing at the top of x-axis title)
+
+## in grids
+library(cowplot)
+library(grid)
+library(gridGraphics)
+
+row1 <- plot_grid(
+  plot1 + theme(legend.position = "none"),
+  plot2 + theme(legend.position = "none"),
+  plot3 + theme(legend.position = "none"),
+  plot4 + theme(legend.position = "none"),
+  ncol = 4, nrow = 1
+)
+
+row2 <- plot_grid(
+  plot5 + theme(legend.position = "none"),
+  plot6 + theme(legend.position = "none"),
+  plot7 + theme(legend.position = "none"),
+  plot8 + theme(legend.position = "none"),
+  ncol = 4, nrow = 1
+)
+
+title1 <- ggplot() + 
+  annotate("text", x = 0.5, y = 0.5, label = "Vote Share", size = 5, fontface = "bold") + 
+  theme_void()
+
+row1_with_title <- plot_grid(
+  title1,
+  row1,
+  ncol = 1,
+  rel_heights = c(0.05, 1)
+)
+
+title2 <- ggplot() + 
+  annotate("text", x = 0.5, y = 0.5, label = "Share of Wins", size = 5, fontface = "bold") + 
+  theme_void()
+
+row2_with_title <- plot_grid(
+  title2,
+  row2,
+  ncol = 1,
+  rel_heights = c(0.05, 1)
+)
+
+blank_plot <- ggplot() + theme_void()
+
+int2 <- plot_grid(row1_with_title, blank_plot, row2_with_title, ncol = 1, rel_heights = c(1, 0.1, 1))
+plot_grid(int2, ncol = 1, rel_heights = c(1, 0.1))
+
+ggsave("interaction_twocol.png", plot = last_plot(),
+       width = 10, height = 7)
+
+```
+
+```{r}
+#---------------------------------------------
 # Analysis: effect of safeness on csm
 #---------------------------------------------
 
 data <- data %>% mutate(win1 = ifelse(is.na(w_margin_1)==T, 0, 1))
-
-feols(pri2 ~ win1 + prior.pri2 + inc + ruling | district + congress + party, data)
-feols(pri2 ~ win1*ruling | district + party + congress, cluster = ~ district, data)
-
-
-# baseline
-
-feols(pri2 ~ vs_1_p | district + congress + party, data)
-feols(pri2 ~ avg_vs2_p | district + congress + party, data)
-feols(pri2 ~ avg_vs3_p | district + congress + party, data)
-feols(pri2 ~ avg_vs4_p | district + congress + party, data)
-feols(pri2 ~ win4 | district + congress + party, data)
-feols(pri2 ~ win3 | district + congress + party, data)
-feols(pri2 ~ win2 | district + congress + party, data)
-feols(pri2 ~ win1 | district + congress + party, data)
-
-feols(pri2 ~ mar_cont | district + congress + party, data)
-feols(pri2 ~ mar_cont2 | district + congress + party, data)
-
 
 # baseline with district by party FE
 
@@ -1947,6 +2275,8 @@ ggsave("coef_win_napp.png", plot = last_plot(),
 #---------------------------------------------
 # logistic regression
 #---------------------------------------------
+data$ruling <- as.numeric(data$ruling)
+
 pri <- mean(data$prior.pri2, na.rm=T)
 ruling <- mean(data$ruling, na.rm=T)
 inc <- mean(data$inc, na.rm=T)
@@ -2009,7 +2339,7 @@ ggplot(pred, aes(range, V1)) + geom_point(aes(color = party), size = 0.5) +
   geom_rug(log_rug, mapping= aes(x=avg_vs4_p, y=NULL), inherit.aes=FALSE, sides = "b", col = "darkgrey") #+
 
 ggsave("log.png", plot = last_plot(),
-       width = 4, height = 6)
+       width = 10, height = 6)
 #---------------------------------------------
 
 
@@ -2180,4 +2510,60 @@ ggsave("thres_binary.png", plot = last_plot(),
 #---------------------------------------------
 
 library(rgdal)
+```
+
+
+```{r}
+library(plyr)
+library(dplyr)
+library(beepr)
+library(stargazer)
+library(xtable)
+library(ggplot2)
+library(RColorBrewer)
+library(gridExtra)
+
+load("05_replication_data.Rdata")
+
+# Merge datasets ----------------------------------------------------------
+
+# trim DALP variables
+parties<- dalp %>% select(1:6, d1, d2, d3, d4, d5, dw, starts_with("cosalpo"), partysize)
+
+# filter latam data to relevant years & add DALP measures
+polar<- latam %>%
+  filter(year >= 2006, year <= 2010) %>%
+  left_join(parties, by = c("country", "partyDALP" = "party"))
+
+# n parties per election
+polar<- polar %>%
+  group_by(country, year) %>%
+  mutate(party_dat = sum(!is.na(d1))) %>%
+  ungroup()
+
+# Figure 1 ----------------------------------------------------------------
+### Primary election laws 
+
+laws$country <- with(laws, factor(country, levels = rev(levels(country))))
+laws$Primary_Laws <- with(laws, factor(status, 
+                                       levels = c("Unspecified", "Voluntary", 
+                                                  "Mandatory, Not Enforced",
+                                                  "Mandatory, Enforced")))
+laws$Primary_Held <- ifelse(is.na(laws$election.year), NA, as.character(laws$election.year))
+k <- which(laws$Primary_Held %in% c("One Party", "Some Major Parties", "Some Parties"))
+laws$Primary_Held[k] <- "Some Major Parties"
+laws$Primary_Held <- factor(laws$Primary_Held, levels = rev(c("None", "Some Major Parties", "All Major Parties")))
+
+laws_ss <- filter(laws, !is.na(Primary_Held))
+
+a <- ggplot(NULL, aes(x = year, y = country), size = 1) + 
+  geom_tile(data = filter(laws, !is.na(Primary_Laws)), aes(fill = Primary_Laws), size = 0) + 
+  geom_point(data = laws_ss, aes(shape = Primary_Held), size = 4, bg= "gray85") + theme_bw() + 
+  xlab("Year") + ylab("") + ggtitle("Primary Laws in Latin America by Country, Year") + 
+  scale_shape_manual("Primaries Held in \nPresidential Election", labels = c("All Major Parties", "Some Major Parties", "None"), values = c(24, 22, 21)) +
+  # scale_colour_manual("Primaries Held in \nPresidential Election", labels = c("All Major Parties", "Some Major Parties", "None"), values = c("gray75", "gray50", "gray25")) +
+  scale_fill_manual("Primary Laws", values = c("#a1dab4", "#41b6c4", "#2c7fb8", "#225ea8"), na.value = "transparent") +
+  theme(plot.background = element_rect(fill = "transparent",colour = NA))
+ggsave(a, filename = "Output/Figure_1_primary_laws.pdf", width = 10, height = 5.25)
+
 ```
